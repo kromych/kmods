@@ -11,13 +11,17 @@ MODULE_VERSION("0.01");
 
 static int __init init_hello(void)
 {
-    pr_alert("Hello, world!");
+    // Without \n, the output will be delayed until the printk buffer is full
+    pr_alert("Hello, world!\n");
+    dump_stack();
     return 0;
 }
 
 static void __exit exit_hello(void)
 {
-    pr_alert("Bye, world!");
+    // Without \n, the output will be delayed until the printk buffer is full
+    pr_alert("Bye, world!\n");
+    dump_stack();
 }
 
 module_init(init_hello);
