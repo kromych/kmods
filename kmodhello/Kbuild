@@ -1,2 +1,3 @@
 obj-m := kmodhello.o
 kmodhello-y := kmodhello-main.o
+ccflags-y=-ggdb

@@ -6,6 +6,7 @@ default: $(BUILD_DIR_MAKEFILE)
 	-rm $(PWD)/../kinclude
 	-ln -rs $(KDIR)/include $(PWD)/../kinclude
 	make -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) modules
+	gcc kmodprocfs-test.c -o kmodprocfs-test
 
 $(BUILD_DIR):
 	mkdir -p "$@"
@@ -15,3 +16,4 @@ $(BUILD_DIR_MAKEFILE): $(BUILD_DIR)
 
 clean:
 	make -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) clean
+	-rm kmodprocfs-test
