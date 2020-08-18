@@ -16,8 +16,7 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
-
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "kmodprocfs.h"
 
@@ -64,6 +63,7 @@ static const struct proc_ops procfs_example_ops = {
 static struct proc_dir_entry    *dentry;
 static u8                       *data_buffer;
 static size_t                    data_size;
+static off_t                     data_pos;
 
 /* Example call trace (4.19):
         dump_stack+0x66/0x90
@@ -96,6 +96,7 @@ static int __init init_procfs_example(void)
 
         if (!data_buffer) {
             data_buffer = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
+            data_size = 0;
         }
 
         if (!data_buffer) {
@@ -165,6 +166,7 @@ static int proc_open(struct inode *inodep, struct file *fp)
             opened = true;
             owner_pid = pid;
             owner_uid = uid;
+            data_pos = 0;
             ret = 0;
 
             pr_info("Opened " PROC_FILE_PATH " task group %d, uid %d\n", pid, uid);
@@ -202,14 +204,24 @@ static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, l
     mutex_lock(&state_mutex);
 
     if (opened && pid == owner_pid && uid == owner_uid) {
-        pr_info("Reading %lu bytes from " PROC_FILE_PATH ": task group %d, uid %d\n", size, pid, uid);
+        size_t available = data_size - data_pos;
+
+        pr_info("Reading %lu bytes from " PROC_FILE_PATH ", available %lu: task group %d, uid %d\n", size, available, pid, uid);
         if (dump_stack_trace) dump_stack();
 
-        if (size > data_size) {
-            size = data_size;
+        if (size > available) {
+            size = available;
         }
         
-        ret = copy_to_user(user_data, data_buffer, size) ? -EFAULT : size;
+        if (size > 0) {
+            ret = copy_to_user(user_data, data_buffer + data_pos, size) ? -EFAULT : size;
+
+            if (ret > 0) {
+                data_pos += size;
+            }
+        } else {
+            ret = 0;
+        }
 
     } else {
         pr_info("Reading from " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
@@ -242,17 +254,24 @@ static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t
     mutex_lock(&state_mutex);
 
     if (opened && pid == owner_pid && uid == owner_uid) {
-        pr_info("Writing %lu bytes to " PROC_FILE_PATH ": task group %d, uid %d\n", size, pid, uid);
+        size_t available = PROC_BUF_SIZE - data_pos;
+
+        pr_info("Writing %lu bytes to " PROC_FILE_PATH ", available %lu: task group %d, uid %d\n", size, available, pid, uid);
         if (dump_stack_trace) dump_stack();
 
-        if (size > PROC_BUF_SIZE) {
-            size = PROC_BUF_SIZE;            
+        if (size > available) {
+            size = available;            
         } 
         
-        ret = copy_from_user(data_buffer, user_data, size) ? -EFAULT : size;
+        if (size > 0) {
+            ret = copy_from_user(data_buffer + data_pos, user_data, size) ? -EFAULT : size;
 
-        if (ret >= 0) {
-            data_size = size;
+            if (ret > 0) {
+                data_pos += size;
+                data_size = data_pos > data_size ? data_pos : data_size;
+            }
+        } else {
+            ret = -ENOSPC;
         }
 
     } else {

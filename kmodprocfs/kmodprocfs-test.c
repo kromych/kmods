@@ -15,7 +15,7 @@ void test_read(void) {
     if (!f) {
         fprintf(stderr, "Opening " PROC_FILE_PATH " failed: %#04x\n", errno);
     } else {
-        char* buffer = calloc(1, PROC_BUF_SIZE);
+        char *buffer = calloc(1, PROC_BUF_SIZE);
 
         if (!buffer) {
             fputs("Not enough memory", stderr);
@@ -38,17 +38,15 @@ void test_write(void) {
     if (!f) {
         fprintf(stderr, "Opening " PROC_FILE_PATH " failed: %#04x\n", errno);
     } else {
-        char* buffer = calloc(1, PROC_BUF_SIZE);
+        char buffer[] = "testTest_TeST";
 
         if (!buffer) {
             fputs("Not enough memory", stderr);
         } else {
             size_t nitem_written;
 
-            nitem_written = fwrite(buffer, PROC_BUF_SIZE, 1, f);
-            fprintf(stdout, "Wrote %lu bytes\n", nitem_written*PROC_BUF_SIZE);
-
-            free(buffer);
+            nitem_written = fwrite(buffer, sizeof(buffer), 1, f);
+            fprintf(stdout, "Wrote %lu bytes\n", nitem_written*sizeof(buffer));
         }
 
         fclose(f);
@@ -67,19 +65,22 @@ void test_mmap(void) {
             fprintf(stderr, "Mapping failed: %#04x\n", errno);
         } else { 
             fprintf(stdout, "Mapped at: %p\n", addr);
+            
+            close(fd);            
+
+            fprintf(stdout, "Contents: %s\n", addr);
+
             munmap(addr, PROC_BUF_SIZE);
         }
-
-        close(fd);
     }
 }
 
 int main() {
-    test_read();
     test_write();
+    test_read();
+    test_mmap();
     //test_ioctl();
     //test_seek();
-    test_mmap();
 
     return 0;
 }
