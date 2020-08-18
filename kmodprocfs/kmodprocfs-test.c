@@ -20,7 +20,11 @@ void test_read(void) {
         if (!buffer) {
             fputs("Not enough memory", stderr);
         } else {
-            fread(buffer, PROC_BUF_SIZE, 1, f);
+            size_t nitem_read;
+
+            nitem_read = fread(buffer, PROC_BUF_SIZE, 1, f);
+            fprintf(stdout, "Read %lu bytes\n", nitem_read*PROC_BUF_SIZE);
+
             free(buffer);
         }
 
@@ -39,7 +43,11 @@ void test_write(void) {
         if (!buffer) {
             fputs("Not enough memory", stderr);
         } else {
-            fwrite(buffer, PROC_BUF_SIZE, 1, f);
+            size_t nitem_written;
+
+            nitem_written = fwrite(buffer, PROC_BUF_SIZE, 1, f);
+            fprintf(stdout, "Wrote %lu bytes\n", nitem_written*PROC_BUF_SIZE);
+
             free(buffer);
         }
 
@@ -55,10 +63,10 @@ void test_mmap(void) {
     } else {
         char* addr = mmap(NULL, PROC_BUF_SIZE, PROT_READ, MAP_PRIVATE, fd, 0);
     
-        if (!addr) {
-            fprintf(stderr, "Mapping failed: %#04x", errno);
+        if (addr == MAP_FAILED) {
+            fprintf(stderr, "Mapping failed: %#04x\n", errno);
         } else { 
-            fprintf(stdout, "Mapped at: %p", addr);
+            fprintf(stdout, "Mapped at: %p\n", addr);
             munmap(addr, PROC_BUF_SIZE);
         }
 

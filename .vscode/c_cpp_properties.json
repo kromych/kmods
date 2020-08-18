@@ -5,7 +5,7 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/kinclude",
-                "${workspaceFolder}/kinclude/asm-generic"
+                "${workspaceFolder}/kasm"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc-9",
