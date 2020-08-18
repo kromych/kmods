@@ -3,7 +3,7 @@ BUILD_DIR ?= $(PWD)/build
 BUILD_DIR_MAKEFILE ?= $(PWD)/build/Makefile
 
 default: $(BUILD_DIR_MAKEFILE)
-	make -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) modules
+	make -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) CFLAGS=-ggdb modules
 
 $(BUILD_DIR):
 	mkdir -p "$@"
