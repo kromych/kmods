@@ -1,3 +1,4 @@
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 
@@ -10,9 +11,9 @@
 #include "kmodprocfs.h"
 
 void test_read(void) {
-    FILE* f = fopen(PROC_FILE_PATH, "rb");
+    int fd = open(PROC_FILE_PATH, O_RDONLY);
 
-    if (!f) {
+    if (fd == -1) {
         fprintf(stderr, "Opening " PROC_FILE_PATH " failed: %#04x\n", errno);
     } else {
         char *buffer = calloc(1, PROC_BUF_SIZE);
@@ -20,15 +21,19 @@ void test_read(void) {
         if (!buffer) {
             fputs("Not enough memory", stderr);
         } else {
-            size_t nitem_read;
+            if (ioctl(fd, PROC_IOCTL_RESET_POS) == 0) {
+                size_t bytes_read;
 
-            nitem_read = fread(buffer, PROC_BUF_SIZE, 1, f);
-            fprintf(stdout, "Read %lu bytes\n", nitem_read*PROC_BUF_SIZE);
+                bytes_read = read(fd, buffer, PROC_BUF_SIZE);
+                fprintf(stdout, "Read %lu bytes: %s\n", bytes_read, buffer);
+            } else {
+                fputs("IOCTL failed", stderr);
+            }
 
             free(buffer);
         }
 
-        fclose(f);
+        close(fd);
     }
 }
 
@@ -46,7 +51,7 @@ void test_write(void) {
             size_t nitem_written;
 
             nitem_written = fwrite(buffer, sizeof(buffer), 1, f);
-            fprintf(stdout, "Wrote %lu bytes\n", nitem_written*sizeof(buffer));
+            fprintf(stdout, "Wrote %lu bytes: %s\n", nitem_written*sizeof(buffer), buffer);
         }
 
         fclose(f);

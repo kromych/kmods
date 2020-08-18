@@ -35,6 +35,7 @@ static ssize_t	     proc_read(struct file *, char __user *, size_t, loff_t *);
 static ssize_t	     proc_write(struct file *, const char __user *, size_t, loff_t *);
 static int	         proc_release(struct inode *, struct file *);
 static int	         proc_mmap(struct file *, struct vm_area_struct *);
+static long          proc_ioctl(struct file *, unsigned int, unsigned long);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
 
@@ -45,6 +46,7 @@ static const struct file_operations procfs_example_ops = {
 	.write             = proc_write,
 	.release           = proc_release,
 	.mmap              = proc_mmap,
+    .unlocked_ioctl    = proc_ioctl,
 };
 
 #else
@@ -212,7 +214,7 @@ static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, l
         if (size > available) {
             size = available;
         }
-        
+
         if (size > 0) {
             ret = copy_to_user(user_data, data_buffer + data_pos, size) ? -EFAULT : size;
 
@@ -260,9 +262,9 @@ static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t
         if (dump_stack_trace) dump_stack();
 
         if (size > available) {
-            size = available;            
-        } 
-        
+            size = available;
+        }
+
         if (size > 0) {
             ret = copy_from_user(data_buffer + data_pos, user_data, size) ? -EFAULT : size;
 
@@ -307,7 +309,7 @@ static int proc_release(struct inode *inodep, struct file *fp)
     if (opened && pid == owner_pid && uid == owner_uid) {
         pr_info("Closed " PROC_FILE_PATH ": task group %d, uid %d\n", pid, uid);
         if (dump_stack_trace) dump_stack();
-        
+
         opened = false;
         ret = 0;
     } else {
@@ -350,8 +352,54 @@ static int proc_mmap(struct file *fp, struct vm_area_struct *vma)
             virt_to_phys((u8*)data_buffer + (vma->vm_pgoff << PAGE_SHIFT)) >> PAGE_SHIFT,
             PROC_BUF_SIZE,
             vma->vm_page_prot) ? -EINVAL : 0;
+
+        // Could also set vma->vm_ops
     } else {
         pr_info("Mapping " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
+        ret = -EBADF; // TODO Might be -EPERM
+    }
+
+    mutex_unlock(&state_mutex);
+
+    return ret;
+}
+
+/* Example stack trace (4.19):
+        dump_stack+0x66/0x90
+        proc_ioctl.cold+0x63/0x7d [kmodprocfs]
+        proc_reg_unlocked_ioctl+0x3a/0x60
+        do_vfs_ioctl+0x3e4/0x640
+        ? handle_mm_fault+0xdc/0x210
+        ksys_ioctl+0x5e/0x90
+        __x64_sys_ioctl+0x16/0x20
+        do_syscall_64+0x55/0x110
+        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+*/
+static long proc_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
+{
+    pid_t pid = task_pid_vnr(current);
+    uid_t uid = current_uid().val;
+
+    int ret;
+
+    mutex_lock(&state_mutex);
+
+    if (opened && pid == owner_pid && uid == owner_uid) {
+        pr_info("IOCTL %#08x for " PROC_FILE_PATH ": task group %d, uid %d\n", cmd, pid, uid);
+        if (dump_stack_trace) dump_stack();
+
+        switch (cmd) {
+        case PROC_IOCTL_RESET_POS:
+            data_pos = 0;
+            ret = 0;
+            break;
+
+        default:
+            ret = -EINVAL;
+            break;
+        }
+    } else {
+        pr_info("IOCTL %#08x for " PROC_FILE_PATH " failed: task group %d, uid %d\n", cmd, pid, uid);
         ret = -EBADF; // TODO Might be -EPERM
     }
 
