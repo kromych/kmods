@@ -33,7 +33,7 @@ static ssize_t	     proc_write(struct file *, const char __user *, size_t, loff_
 static int	         proc_release(struct inode *, struct file *);
 static int	         proc_mmap(struct file *, struct vm_area_struct *);
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
 
 static const struct file_operations procfs_example_ops = {
     .owner             = THIS_MODULE,

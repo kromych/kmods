@@ -6,7 +6,7 @@ default: $(BUILD_DIR_MAKEFILE)
 	-rm $(PWD)/../kinclude
 	-ln -rs $(KDIR)/include $(PWD)/../kinclude
 	make -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) modules
-	gcc kmodprocfs-test.c -o kmodprocfs-test
+	gcc kmodprocfs-test.c -o $(BUILD_DIR)/kmodprocfs-test
 
 $(BUILD_DIR):
 	mkdir -p "$@"
