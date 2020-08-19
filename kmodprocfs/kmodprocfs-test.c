@@ -10,11 +10,16 @@
 
 #include "kmodprocfs.h"
 
-void test_read(void) {
-    int fd = open(PROC_FILE_PATH, O_RDONLY);
+void test_read(int entry_idx) {
+    char name[PROC_MAX_NAME_LEN];
+    int fd;
+    
+    snprintf(name, sizeof(name) - 1, PROC_DIR_PATH "%d", entry_idx);
+
+    fd = open(name, O_RDONLY);
 
     if (fd == -1) {
-        fprintf(stderr, "Opening " PROC_FILE_PATH " failed: %#04x\n", errno);
+        fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
     } else {
         char *buffer = calloc(1, PROC_BUF_SIZE);
 
@@ -37,11 +42,16 @@ void test_read(void) {
     }
 }
 
-void test_write(void) {
-    FILE* f = fopen(PROC_FILE_PATH, "wb");
+void test_write(int entry_idx) {
+    char name[PROC_MAX_NAME_LEN];
+    FILE *f;
+    
+    snprintf(name, sizeof(name) - 1, PROC_DIR_PATH "%d", entry_idx);
+
+    f = fopen(name, "wb");
 
     if (!f) {
-        fprintf(stderr, "Opening " PROC_FILE_PATH " failed: %#04x\n", errno);
+        fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
     } else {
         char buffer[] = "testTest_TeST";
 
@@ -58,11 +68,16 @@ void test_write(void) {
     }
 }
 
-void test_mmap(void) {
-    int fd = open(PROC_FILE_PATH, O_RDONLY);
+void test_mmap(int entry_idx) {
+    char name[PROC_MAX_NAME_LEN];
+    int fd;
+    
+    snprintf(name, sizeof(name) - 1, PROC_DIR_PATH "%d", entry_idx);
+
+    fd = open(name, O_RDONLY);
 
     if (fd == -1) {
-        fprintf(stderr, "Opening " PROC_FILE_PATH " failed: %#04x\n", errno);
+        fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
     } else {
         char* addr = mmap(NULL, PROC_BUF_SIZE, PROT_READ, MAP_PRIVATE, fd, 0);
     
@@ -81,11 +96,15 @@ void test_mmap(void) {
 }
 
 int main() {
-    test_write();
-    test_read();
-    test_mmap();
-    //test_ioctl();
-    //test_seek();
+    int i;
 
+    for (i = 0; i < PROC_DEFAULT_ENTRIES; ++i) {
+        test_write(i);
+        test_read(i);
+        test_mmap(i);
+        //test_ioctl(i);
+        //test_seek(i);
+    }
+ 
     return 0;
 }

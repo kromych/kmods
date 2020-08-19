@@ -20,15 +20,19 @@
 
 #include "kmodprocfs.h"
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("kromych");
 MODULE_DESCRIPTION("procfs example");
 MODULE_VERSION("0.01");
 
-static bool dump_stack_trace = false;
+static bool     dump_stack_trace = false;
+static ulong    entry_count = PROC_DEFAULT_ENTRIES;
 
 module_param(dump_stack_trace, bool, 0644); // Permissions in /sysfs
 MODULE_PARM_DESC(dump_stack_trace, "Dumping stack traces");
+
+module_param(entry_count, ulong, 00); // Permissions in /sysfs
+MODULE_PARM_DESC(entry_count, "Number of entries");
 
 static int	         proc_open(struct inode *, struct file *);
 static ssize_t	     proc_read(struct file *, char __user *, size_t, loff_t *);
@@ -62,10 +66,22 @@ static const struct proc_ops procfs_example_ops = {
 
 #endif
 
-static struct proc_dir_entry    *dentry;
-static u8                       *data_buffer;
-static size_t                    data_size;
-static off_t                     data_pos;
+struct proc_entry_datum {
+    struct mutex lock;
+    struct proc_dir_entry *dentry;
+
+    u8       data_buffer[PROC_BUF_SIZE];
+    char     name[PROC_MAX_NAME_LEN];
+
+    bool     opened;
+    size_t   data_size;
+    off_t    data_pos;
+    pid_t    owner_pid;
+    uid_t    owner_uid;
+};
+
+static struct proc_dir_entry   *root_dentry;
+static struct proc_entry_datum *data;
 
 /* Example call trace (4.19):
         dump_stack+0x66/0x90
@@ -83,26 +99,44 @@ static off_t                     data_pos;
 */
 static int __init init_procfs_example(void)
 {
-    dentry = proc_create(
-        PROC_FILE_NAME,
-        0666,
-        NULL, // No parent
-        &procfs_example_ops);
+    u32 i;
 
-    if (dentry == NULL) {
-        pr_err("Creating " PROC_FILE_PATH " failed\n");
+    root_dentry = proc_mkdir(
+        PROC_DIR_NAME,
+        NULL); // No parent
+
+    if (root_dentry == NULL) {
+        pr_err("Creating " PROC_DIR_PATH " failed\n");
         return -ENOMEM;
     } else {
-        pr_info("Created " PROC_FILE_PATH "\n");
+        pr_info("Created " PROC_DIR_PATH "\n");
         if (dump_stack_trace) dump_stack();
 
-        if (!data_buffer) {
-            data_buffer = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
-            data_size = 0;
+        if (!data) {
+            data = kzalloc(entry_count*sizeof(struct proc_entry_datum), GFP_KERNEL);            
         }
 
-        if (!data_buffer) {
+        if (!data) {
             return -ENOMEM;
+        }
+
+        for (i = 0; i < entry_count; ++i) {
+            mutex_init(&data[i].lock);
+            snprintf(&data[i].name[0], PROC_MAX_NAME_LEN - 1, "%d", i);
+
+            data[i].dentry = proc_create_data(
+                &data[i].name[0],
+                0666,
+                root_dentry,
+                &procfs_example_ops,
+                &data[i]);
+
+            if (!data[i].dentry) {
+                pr_err("Can't create " PROC_DIR_PATH "%s\n", &data[i].name[0]);
+                return -ENOMEM;
+            } else {
+                pr_info("Created " PROC_DIR_PATH "%s\n", &data[i].name[0]);
+            }
         }
     }
 
@@ -118,25 +152,23 @@ static int __init init_procfs_example(void)
 */
 static void __exit exit_procfs_example(void)
 {
-    if (dentry) {
-        proc_remove(dentry);
-        pr_info("Removed " PROC_FILE_PATH "\n");
-        if (dump_stack_trace) dump_stack();
+    if (data) {
+        u32 i;
+
+        for (i = 0; i < entry_count; ++i) {
+            proc_remove(data[i].dentry);
+        }
+
+        kfree(data);
     }
 
-    if (data_buffer) {
-        kfree(data_buffer);
+    if (root_dentry) {
+        proc_remove(root_dentry);
     }
 }
 
 module_init(init_procfs_example);
 module_exit(exit_procfs_example);
-
-static DEFINE_MUTEX(state_mutex);
-
-static bool     opened;
-static pid_t    owner_pid;
-static uid_t    owner_uid;
 
 /* Example call trace (4.19):
         dump_stack+0x66/0x90
@@ -154,34 +186,33 @@ static uid_t    owner_uid;
 */
 static int proc_open(struct inode *inodep, struct file *fp)
 {
+    struct proc_entry_datum* datum = PDE_DATA(file_inode(fp));
+
     pid_t pid = task_pid_vnr(current);
     uid_t uid = current_uid().val;
 
     int ret;
 
-    mutex_lock(&state_mutex);
+    mutex_lock(&datum->lock);
 
-    pr_info("Opening " PROC_FILE_PATH " task group %d, uid %d\n", pid, uid);
+    pr_info("Opening %s task group %d, uid %d\n", datum->name, pid, uid);
 
-    if (!opened && uid == 0) {
-        if (data_buffer) {
-            opened = true;
-            owner_pid = pid;
-            owner_uid = uid;
-            data_pos = 0;
-            ret = 0;
+    if (!datum->opened && uid == 0) {
+        datum->opened = true;
+        datum->owner_pid = pid;
+        datum->owner_uid = uid;
+        datum->data_pos = 0;
 
-            pr_info("Opened " PROC_FILE_PATH " task group %d, uid %d\n", pid, uid);
-            if (dump_stack_trace) dump_stack();
-        } else {
-            ret = -ENOMEM;
-        }
+        ret = 0;
+
+        pr_info("Opened %s task group %d, uid %d\n", datum->name, pid, uid);
+        if (dump_stack_trace) dump_stack();
     } else {
-        pr_err("Opening " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
+        pr_err("Opening %s failed: task group %d, uid %d\n", datum->name, pid, uid);
         ret = -ENXIO;
     }
 
-    mutex_unlock(&state_mutex);
+    mutex_unlock(&datum->lock);
 
     return ret;
 }
@@ -198,39 +229,34 @@ static int proc_open(struct inode *inodep, struct file *fp)
 */
 static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, loff_t *offesetp)
 {
-    pid_t pid = task_pid_vnr(current);
-    uid_t uid = current_uid().val;
-
+    struct proc_entry_datum* datum = PDE_DATA(file_inode(fp));
+    size_t available;
     int ret;
 
-    mutex_lock(&state_mutex);
+    mutex_lock(&datum->lock);
 
-    if (opened && pid == owner_pid && uid == owner_uid) {
-        size_t available = data_size - data_pos;
+    available = datum->data_size - datum->data_pos;
 
-        pr_info("Reading %lu bytes from " PROC_FILE_PATH ", available %lu: task group %d, uid %d\n", size, available, pid, uid);
-        if (dump_stack_trace) dump_stack();
+    pr_info("Reading %lu bytes from %s, available %lu: task group %d, uid %d\n", 
+        size, datum->name, available, datum->owner_pid, datum->owner_uid);
 
-        if (size > available) {
-            size = available;
-        }
+    if (dump_stack_trace) dump_stack();
 
-        if (size > 0) {
-            ret = copy_to_user(user_data, data_buffer + data_pos, size) ? -EFAULT : size;
-
-            if (ret > 0) {
-                data_pos += size;
-            }
-        } else {
-            ret = 0;
-        }
-
-    } else {
-        pr_info("Reading from " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
-        ret = -EBADF; // TODO Might be -EPERM
+    if (size > available) {
+        size = available;
     }
 
-    mutex_unlock(&state_mutex);
+    if (size > 0) {
+        ret = copy_to_user(user_data, datum->data_buffer + datum->data_pos, size) ? -EFAULT : size;
+
+        if (ret > 0) {
+            datum->data_pos += size;
+        }
+    } else {
+        ret = 0;
+    }
+
+    mutex_unlock(&datum->lock);
 
     return ret;
 }
@@ -248,40 +274,35 @@ static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, l
 */
 static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t size, loff_t *offset)
 {
-    pid_t pid = task_pid_vnr(current);
-    uid_t uid = current_uid().val;
-
+    struct proc_entry_datum* datum = PDE_DATA(file_inode(fp));
+    size_t available;
     int ret;
 
-    mutex_lock(&state_mutex);
+    mutex_lock(&datum->lock);
 
-    if (opened && pid == owner_pid && uid == owner_uid) {
-        size_t available = PROC_BUF_SIZE - data_pos;
+    available = PROC_BUF_SIZE - datum->data_pos;
 
-        pr_info("Writing %lu bytes to " PROC_FILE_PATH ", available %lu: task group %d, uid %d\n", size, available, pid, uid);
-        if (dump_stack_trace) dump_stack();
+    pr_info("Writing %lu bytes to %s, available %lu: task group %d, uid %d\n", 
+        size, datum->name, available, datum->owner_pid, datum->owner_uid);
 
-        if (size > available) {
-            size = available;
-        }
+    if (dump_stack_trace) dump_stack();
 
-        if (size > 0) {
-            ret = copy_from_user(data_buffer + data_pos, user_data, size) ? -EFAULT : size;
-
-            if (ret > 0) {
-                data_pos += size;
-                data_size = data_pos > data_size ? data_pos : data_size;
-            }
-        } else {
-            ret = -ENOSPC;
-        }
-
-    } else {
-        pr_info("Writing to " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
-        ret = -EBADF; // TODO Might be -EPERM
+    if (size > available) {
+        size = available;
     }
 
-    mutex_unlock(&state_mutex);
+    if (size > 0) {
+        ret = copy_from_user(datum->data_buffer + datum->data_pos, user_data, size) ? -EFAULT : size;
+
+        if (ret > 0) {
+            datum->data_pos += size;
+            datum->data_size = datum->data_pos > datum->data_size ? datum->data_pos : datum->data_size;
+        }
+    } else {
+        ret = -ENOSPC;
+    }
+
+    mutex_unlock(&datum->lock);
 
     return ret;
 }
@@ -299,27 +320,16 @@ static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t
 */
 static int proc_release(struct inode *inodep, struct file *fp)
 {
-    pid_t pid = task_pid_vnr(current);
-    uid_t uid = current_uid().val;
+    struct proc_entry_datum* datum = PDE_DATA(file_inode(fp));
 
-    int ret;
+    mutex_lock(&datum->lock);
 
-    mutex_lock(&state_mutex);
+    pr_info("Closed %s: task group %d, uid %d\n", datum->name, datum->owner_pid, datum->owner_uid);
+    if (dump_stack_trace) dump_stack();
 
-    if (opened && pid == owner_pid && uid == owner_uid) {
-        pr_info("Closed " PROC_FILE_PATH ": task group %d, uid %d\n", pid, uid);
-        if (dump_stack_trace) dump_stack();
+    mutex_unlock(&datum->lock);
 
-        opened = false;
-        ret = 0;
-    } else {
-        pr_info("Closing " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
-        ret = -EBADF; // TODO Might be -EPERM
-    }
-
-    mutex_unlock(&state_mutex);
-
-    return ret;
+    return 0;
 }
 
 /* Example call trace (4.19):
@@ -335,31 +345,23 @@ static int proc_release(struct inode *inodep, struct file *fp)
 */
 static int proc_mmap(struct file *fp, struct vm_area_struct *vma)
 {
-    pid_t pid = task_pid_vnr(current);
-    uid_t uid = current_uid().val;
+    struct proc_entry_datum* datum = PDE_DATA(file_inode(fp));
 
     int ret;
 
-    mutex_lock(&state_mutex);
+    mutex_lock(&datum->lock);
 
-    if (opened && pid == owner_pid && uid == owner_uid) {
-        pr_info("Mapping " PROC_FILE_PATH ": task group %d, uid %d\n", pid, uid);
-        if (dump_stack_trace) dump_stack();
+    pr_info("Mapping %s: task group %d, uid %d\n", datum->name, datum->owner_pid, datum->owner_uid);
+    if (dump_stack_trace) dump_stack();
 
-        ret = remap_pfn_range(
-            vma,
-            vma->vm_start,
-            virt_to_phys((u8*)data_buffer + (vma->vm_pgoff << PAGE_SHIFT)) >> PAGE_SHIFT,
-            PROC_BUF_SIZE,
-            vma->vm_page_prot) ? -EINVAL : 0;
+    ret = remap_pfn_range(
+        vma,
+        vma->vm_start,
+        virt_to_phys((u8*)datum->data_buffer + (vma->vm_pgoff << PAGE_SHIFT)) >> PAGE_SHIFT,
+        PROC_BUF_SIZE,
+        vma->vm_page_prot) ? -EINVAL : 0;
 
-        // Could also set vma->vm_ops
-    } else {
-        pr_info("Mapping " PROC_FILE_PATH " failed: task group %d, uid %d\n", pid, uid);
-        ret = -EBADF; // TODO Might be -EPERM
-    }
-
-    mutex_unlock(&state_mutex);
+    mutex_unlock(&datum->lock);
 
     return ret;
 }
@@ -377,33 +379,27 @@ static int proc_mmap(struct file *fp, struct vm_area_struct *vma)
 */
 static long proc_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 {
-    pid_t pid = task_pid_vnr(current);
-    uid_t uid = current_uid().val;
+    struct proc_entry_datum* datum = PDE_DATA(file_inode(fp));
 
     int ret;
 
-    mutex_lock(&state_mutex);
+    mutex_lock(&datum->lock);
 
-    if (opened && pid == owner_pid && uid == owner_uid) {
-        pr_info("IOCTL %#08x for " PROC_FILE_PATH ": task group %d, uid %d\n", cmd, pid, uid);
-        if (dump_stack_trace) dump_stack();
+    pr_info("IOCTL %#08x for %s: task group %d, uid %d\n", cmd, datum->name, datum->owner_pid, datum->owner_uid);
+    if (dump_stack_trace) dump_stack();
 
-        switch (cmd) {
-        case PROC_IOCTL_RESET_POS:
-            data_pos = 0;
-            ret = 0;
-            break;
+    switch (cmd) {
+    case PROC_IOCTL_RESET_POS:
+        datum->data_pos = 0;
+        ret = 0;
+        break;
 
-        default:
-            ret = -EINVAL;
-            break;
-        }
-    } else {
-        pr_info("IOCTL %#08x for " PROC_FILE_PATH " failed: task group %d, uid %d\n", cmd, pid, uid);
-        ret = -EBADF; // TODO Might be -EPERM
+    default:
+        ret = -EINVAL;
+        break;
     }
 
-    mutex_unlock(&state_mutex);
+    mutex_unlock(&datum->lock);
 
     return ret;
 }
