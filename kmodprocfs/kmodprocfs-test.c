@@ -53,16 +53,13 @@ void test_write(int entry_idx) {
     if (!f) {
         fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
     } else {
-        char buffer[] = "testTest_TeST";
+        size_t nitem_written;
+        char buffer[PROC_MAX_NAME_LEN];
 
-        if (!buffer) {
-            fputs("Not enough memory", stderr);
-        } else {
-            size_t nitem_written;
+        snprintf(buffer, sizeof(buffer) - 1, "testTest_TeST%d", entry_idx);
 
-            nitem_written = fwrite(buffer, sizeof(buffer), 1, f);
-            fprintf(stdout, "Wrote %lu bytes: %s\n", nitem_written*sizeof(buffer), buffer);
-        }
+        nitem_written = fwrite(buffer, sizeof(buffer), 1, f);
+        fprintf(stdout, "Wrote %lu bytes: %s\n", nitem_written*sizeof(buffer), buffer);
 
         fclose(f);
     }
