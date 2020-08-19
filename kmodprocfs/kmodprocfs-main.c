@@ -324,6 +324,8 @@ static int proc_release(struct inode *inodep, struct file *fp)
 
     mutex_lock(&datum->lock);
 
+    datum->opened = false;
+
     pr_info("Closed %s: task group %d, uid %d\n", datum->name, datum->owner_pid, datum->owner_uid);
     if (dump_stack_trace) dump_stack();
 
