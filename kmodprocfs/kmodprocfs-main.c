@@ -56,12 +56,12 @@ static const struct file_operations procfs_example_ops = {
 #else
 
 static const struct proc_ops procfs_example_ops = {
-    .proc_owner             = THIS_MODULE,
 	.proc_open              = proc_open,
 	.proc_read              = proc_read,
 	.proc_write             = proc_write,
 	.proc_release           = proc_release,
 	.proc_mmap              = proc_mmap,
+    .proc_ioctl             = proc_ioctl,
 };
 
 #endif
@@ -370,7 +370,7 @@ static int proc_mmap(struct file *fp, struct vm_area_struct *vma)
     ret = remap_pfn_range(
         vma,
         vma->vm_start,
-        virt_to_phys((u8*)datum->data_buffer + (vma->vm_pgoff << PAGE_SHIFT)) >> PAGE_SHIFT,
+        __pa((u8*)datum->data_buffer + (vma->vm_pgoff << PAGE_SHIFT)) >> PAGE_SHIFT,
         PROC_BUF_SIZE,
         vma->vm_page_prot) ? -EINVAL : 0;
 
