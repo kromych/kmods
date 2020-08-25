@@ -177,19 +177,23 @@ static void __exit exit_procfs_example(void)
 module_init(init_procfs_example);
 module_exit(exit_procfs_example);
 
-/* Example call trace (4.19):
-        dump_stack+0x66/0x90
-        proc_open+0x8a/0x90 [kmodprocfs]
-        proc_reg_open+0x6b/0x110
-        ? proc_i_callback+0x20/0x20
-        do_dentry_open+0x13d/0x370
-        path_openat+0x2e9/0x1270
-        do_filp_open+0x91/0x100
-        ? close_pdeo+0x8f/0xf0
-        ? list_lru_add+0x1a/0x100
-        do_sys_open+0x184/0x210
-        do_syscall_64+0x55/0x110
-        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+/* Example call trace (5.7):
+        dump_stack+0x64/0x88
+        proc_open.cold+0x38/0x3d [kmodprocfs]
+        ? proc_reg_open+0x91/0x180
+        ? proc_reg_release+0xd0/0xd0
+        ? do_dentry_open+0x13a/0x380
+        ? path_openat+0xa9a/0xfe0
+        ? __kernel_text_address+0x2c/0x60
+        ? show_trace_log_lvl+0x1a4/0x2ee
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
+        ? do_filp_open+0x75/0x100
+        ? __check_object_size+0x12e/0x13c
+        ? __alloc_fd+0x44/0x150
+        ? do_sys_openat2+0x8a/0x130
+        ? __x64_sys_openat+0x46/0x70
+        ? do_syscall_64+0x5b/0xf0
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
 */
 static int proc_open(struct inode *inodep, struct file *fp)
 {
@@ -224,15 +228,14 @@ static int proc_open(struct inode *inodep, struct file *fp)
     return ret;
 }
 
-/* Example call trace (4.19):
-        dump_stack+0x66/0x90
-        proc_read.cold+0x53/0x55 [kmodprocfs]
-        proc_reg_read+0x3c/0x60
-        __vfs_read+0x37/0x190
-        vfs_read+0x9d/0x150
-        ksys_read+0x57/0xd0
-        do_syscall_64+0x55/0x110
-        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+/* Example call trace (5.7):
+        dump_stack+0x64/0x88
+        proc_read.cold+0x5/0xa [kmodprocfs]
+        ? proc_reg_read+0x55/0xa0
+        ? vfs_read+0x9d/0x150
+        ? ksys_read+0x4f/0xc0
+        ? do_syscall_64+0x5b/0xf0
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
 */
 static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, loff_t *offesetp)
 {
@@ -254,10 +257,13 @@ static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, l
     }
 
     if (size > 0) {
-        ret = copy_to_user(user_data, datum->data_buffer + datum->data_pos, size) ? -EFAULT : size;
+        size_t nbytes_couldnt_copy = copy_to_user(user_data, datum->data_buffer + datum->data_pos, size);
 
-        if (ret > 0) {
+        if (nbytes_couldnt_copy == 0) {
             datum->data_pos += size;
+            ret = size;
+        } else {
+            ret = -EFAULT;
         }
     } else {
         ret = 0;
@@ -268,16 +274,14 @@ static ssize_t proc_read(struct file *fp, char __user *user_data, size_t size, l
     return ret;
 }
 
-/* Example call trace (4.19):
-        dump_stack+0x66/0x90
-        proc_write.cold+0x51/0x53 [kmodprocfs]
-        proc_reg_write+0x3c/0x60
-        __vfs_write+0x37/0x1a0
-        ? __do_sys_newfstat+0x5a/0x70
-        vfs_write+0xb6/0x190
-        ksys_write+0x57/0xd0
-        do_syscall_64+0x55/0x110
-        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+/* Example call trace (5.7):
+        dump_stack+0x64/0x88
+        proc_write.cold+0x5/0xa [kmodprocfs]
+        ? proc_reg_write+0x55/0xa0
+        ? vfs_write+0xb6/0x1a0
+        ? ksys_write+0x4f/0xc0
+        ? do_syscall_64+0x5b/0xf0
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
 */
 static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t size, loff_t *offset)
 {
@@ -299,11 +303,14 @@ static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t
     }
 
     if (size > 0) {
-        ret = copy_from_user(datum->data_buffer + datum->data_pos, user_data, size) ? -EFAULT : size;
+        size_t nbytes_couldnt_copy = copy_from_user(datum->data_buffer + datum->data_pos, user_data, size);
 
-        if (ret > 0) {
+        if (nbytes_couldnt_copy == 0) {
             datum->data_pos += size;
             datum->data_size = datum->data_pos > datum->data_size ? datum->data_pos : datum->data_size;
+            ret = size;
+        } else {
+            ret = -EFAULT;
         }
     } else {
         ret = -ENOSPC;
@@ -314,16 +321,15 @@ static ssize_t proc_write(struct file *fp, const char __user * user_data, size_t
     return ret;
 }
 
-/* Example call trace (4.19):
-        dump_stack+0x66/0x90
-        proc_release.cold+0x55/0x5e [kmodprocfs]
-        close_pdeo+0x43/0xf0
-        proc_reg_release+0x40/0x50
-        __fput+0xa5/0x1d0
-        task_work_run+0x8f/0xb0
-        exit_to_usermode_loop+0xc2/0xd0
-        do_syscall_64+0xde/0x110
-        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+/* Example call trace (5.7):
+        dump_stack+0x64/0x88
+        proc_release.cold+0x5/0xa [kmodprocfs]
+        ? close_pdeo.part.0+0x35/0xa0
+        ? proc_reg_release+0xc2/0xd0
+        ? __fput+0xe2/0x250
+        ? task_work_run+0x68/0x90
+        ? prepare_exit_to_usermode+0x198/0x1c0
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
 */
 static int proc_release(struct inode *inodep, struct file *fp)
 {
@@ -343,16 +349,16 @@ static int proc_release(struct inode *inodep, struct file *fp)
     return 0;
 }
 
-/* Example call trace (4.19):
-        dump_stack+0x66/0x90
-        proc_mmap.cold+0x55/0x57 [kmodprocfs]
-        proc_reg_mmap+0x39/0x60
-        mmap_region+0x3e9/0x660
-        do_mmap+0x38b/0x560
-        vm_mmap_pgoff+0xd1/0x120
-        ksys_mmap_pgoff+0x18c/0x230
-        do_syscall_64+0x55/0x110
-        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+/* Example call trace (5.7):
+        dump_stack+0x64/0x88
+        proc_mmap.cold+0x5/0xa [kmodprocfs]
+        ? proc_reg_mmap+0x4f/0x90
+        ? mmap_region+0x43e/0x6e0
+        ? do_mmap+0x2f7/0x530
+        ? vm_mmap_pgoff+0xb0/0xf0
+        ? ksys_mmap_pgoff+0x18a/0x250
+        ? do_syscall_64+0x5b/0xf0
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
 */
 static int proc_mmap(struct file *fp, struct vm_area_struct *vma)
 {
@@ -379,16 +385,14 @@ static int proc_mmap(struct file *fp, struct vm_area_struct *vma)
     return ret;
 }
 
-/* Example stack trace (4.19):
-        dump_stack+0x66/0x90
-        proc_ioctl.cold+0x63/0x7d [kmodprocfs]
-        proc_reg_unlocked_ioctl+0x3a/0x60
-        do_vfs_ioctl+0x3e4/0x640
-        ? handle_mm_fault+0xdc/0x210
-        ksys_ioctl+0x5e/0x90
-        __x64_sys_ioctl+0x16/0x20
-        do_syscall_64+0x55/0x110
-        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+/* Example stack trace (5.7):
+        dump_stack+0x64/0x88
+        proc_ioctl.cold+0x5/0xa [kmodprocfs]
+        ? proc_reg_unlocked_ioctl+0x55/0xa0
+        ? ksys_ioctl+0x82/0xc0
+        ? __x64_sys_ioctl+0x16/0x20
+        ? do_syscall_64+0x5b/0xf0
+        ? entry_SYSCALL_64_after_hwframe+0x44/0xa9
 */
 static long proc_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 {
@@ -410,7 +414,7 @@ static long proc_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
         break;
 
     default:
-        ret = -EINVAL;
+        ret = -ENOIOCTLCMD;
         break;
     }
 
