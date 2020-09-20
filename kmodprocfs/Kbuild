@@ -2,4 +2,4 @@ CONFIG_MODULE_SIG=n
 
 obj-m := kmodprocfs.o
 kmodprocfs-y := kmodprocfs-main.o
-ccflags-y=-ggdb -I$(PWD)
+ccflags-y=-ggdb3 -I$(PWD)

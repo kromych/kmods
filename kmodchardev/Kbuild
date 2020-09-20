@@ -2,4 +2,4 @@ CONFIG_MODULE_SIG=n
 
 obj-m := kmodchardev.o
 kmodchardev-y := kmodchardev-main.o
-ccflags-y=-ggdb -I$(PWD)
+ccflags-y=-ggdb3 -I$(PWD)

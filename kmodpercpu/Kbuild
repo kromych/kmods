@@ -1,0 +1,5 @@
+CONFIG_MODULE_SIG=n
+
+obj-m := kmodpercpu.o
+kmodpercpu-y := kmodpercpu-main.o
+ccflags-y=-ggdb3 -I$(PWD)
