@@ -208,7 +208,7 @@ static int proc_open(struct inode *inodep, struct file *fp)
 
     pr_info("Opening " PROC_DIR_PATH "%s task group %d, uid %d\n", datum->name, pid, uid);
 
-    if (!datum->opened && uid == 0) {
+    if (!datum->opened && capable(CAP_SYS_ADMIN)) {
         datum->opened = true;
         datum->owner_pid = pid;
         datum->owner_uid = uid;
