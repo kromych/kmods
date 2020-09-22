@@ -18,15 +18,12 @@
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
 
+#include "kmodchardev.h"
+
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("kromych");
 MODULE_DESCRIPTION("kcdev char device example");
 MODULE_VERSION("0.01");
-
-#define KCDEV_MINOR_START    0
-#define KCDEV_MAX_DEVICES    8
-#define KCDEV_NAME           "kcdev"
-#define KCDEVICE_CLASS       "kcdev_class"
 
 static bool     dump_stack_trace = false;
 static ulong    kcdev_count = KCDEV_MAX_DEVICES;
@@ -78,6 +75,8 @@ static int __init init_kcdev_example(void)
 {
     s64 ret = -EFAULT;
     u32 i;
+
+    if (dump_stack_trace) dump_stack();
 
     // Get the MAJOR and MINOR device numbers dynamically.
     // register_chrdev() does that statically eliminating the need to call
@@ -159,6 +158,8 @@ exit:
 
 static void __exit exit_kcdev_example(void)
 {
+    if (dump_stack_trace) dump_stack();
+
     kcdev_cleanup();
 
     pr_info("kcdev: unregistered %ld device(s) %#04x, major: %#02x, minor: %#02x\n",
@@ -213,6 +214,16 @@ static ssize_t kcdev_read(struct file *fp, char __user *user_data, size_t size, 
     return ret;
 }
 
+/*
+    Call Trace:
+        dump_stack+0x70/0x8d
+        kcdev_write.cold+0x5/0xa [kmodchardev]
+        vfs_write+0xc9/0x200
+        ksys_write+0x67/0xe0
+        __x64_sys_write+0x1a/0x20
+        do_syscall_64+0x52/0xc0
+        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+*/
 static ssize_t kcdev_write(struct file *fp, const char __user * user_data, size_t size, loff_t *offset)
 {
     long ret = -EFAULT;
@@ -240,6 +251,19 @@ static int kcdev_release(struct inode *inodep, struct file *fp)
     return ret;
 }
 
+/*
+    Call Trace:
+        dump_stack+0x70/0x8d
+        kcdev_mmap.cold+0x5/0xa [kmodchardev]
+        mmap_region+0x42f/0x6e0
+        do_mmap+0x30d/0x5c0
+        vm_mmap_pgoff+0xcb/0x120
+        ksys_mmap_pgoff+0x1ca/0x2a0
+        ? __prepare_exit_to_usermode+0x62/0xe0
+        __x64_sys_mmap+0x33/0x40
+        do_syscall_64+0x52/0xc0
+        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+*/
 static int kcdev_mmap(struct file *fp, struct vm_area_struct *vma)
 {
     long ret = -EFAULT;
@@ -249,6 +273,15 @@ static int kcdev_mmap(struct file *fp, struct vm_area_struct *vma)
     return ret;
 }
 
+/*
+    Call Trace:
+        dump_stack+0x70/0x8d
+        kcdev_ioctl.cold+0x5/0xa [kmodchardev]
+        ksys_ioctl+0x8e/0xc0
+        __x64_sys_ioctl+0x1a/0x20
+        do_syscall_64+0x52/0xc0
+        entry_SYSCALL_64_after_hwframe+0x44/0xa9
+*/
 static long kcdev_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 {
     long ret = -EFAULT;

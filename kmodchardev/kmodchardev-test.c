@@ -8,6 +8,113 @@
 #include <unistd.h>
 #include <errno.h>
 
-int main() { 
+#include "kmodchardev.h"
+
+void test_read(int entry_idx) {
+    char name[KCDEV_MAX_NAME_LEN];
+    int fd;
+    
+    snprintf(name, sizeof(name) - 1, "/dev/" KCDEV_NAME "%d", entry_idx);
+
+    fd = open(name, O_RDONLY);
+
+    if (fd == -1) {
+        fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
+    } else {
+        char *buffer = calloc(1, KCDEV_BUF_SIZE);
+
+        if (!buffer) {
+            fputs("Not enough memory", stderr);
+        } else {
+            if (lseek(fd, 0, SEEK_SET) == 0) {
+                size_t bytes_read;
+
+                bytes_read = read(fd, buffer, KCDEV_BUF_SIZE);
+                fprintf(stdout, "Read %lu bytes: %s\n", bytes_read, buffer);
+            } else {
+                fputs("lseek failed", stderr);
+            }
+
+            free(buffer);
+        }
+
+        close(fd);
+    }
+}
+
+void test_write(int entry_idx) {
+    char name[KCDEV_MAX_NAME_LEN];
+    FILE *f;
+    
+    snprintf(name, sizeof(name) - 1, "/dev/" KCDEV_NAME "%d", entry_idx);
+
+    f = fopen(name, "wb");
+
+    if (!f) {
+        fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
+    } else {
+        size_t nitem_written;
+        char buffer[KCDEV_MAX_NAME_LEN];
+
+        snprintf(buffer, sizeof(buffer) - 1, "testTest_TeST%d", entry_idx);
+
+        nitem_written = fwrite(buffer, sizeof(buffer), 1, f);
+        fprintf(stdout, "Wrote %lu bytes: %s\n", nitem_written*sizeof(buffer), buffer);
+
+        fclose(f);
+    }
+}
+
+/*
+    Call stack:
+        dump_stack+0x70/0x8d
+        kcdev_mmap.cold+0x5/0xa [kmodchardev]
+        mmap_region+0x42f/0x6e0
+        do_mmap+0x30d/0x5c0
+        vm_mmap_pgoff+0xcb/0x120
+        ksys_mmap_pgoff+0x1ca/0x2a0
+        ? __prepare_exit_to_usermode+0x62/0xe0
+        __x64_sys_mmap+0x33/0x40
+        do_syscall_64+0x52/0xc0
+        entry_SYSCALL_64_after_hwframe+0x44/0xa9    
+*/
+void test_mmap(int entry_idx) {
+    char name[KCDEV_MAX_NAME_LEN];
+    int fd;
+    
+    snprintf(name, sizeof(name) - 1, "/dev/" KCDEV_NAME "%d", entry_idx);
+
+    fd = open(name, O_RDONLY);
+
+    if (fd == -1) {
+        fprintf(stderr, "Opening %s failed: %#04x\n", name, errno);
+    } else {
+        char* addr = mmap(NULL, KCDEV_BUF_SIZE, PROT_READ, MAP_PRIVATE, fd, 0);
+    
+        if (addr == MAP_FAILED) {
+            fprintf(stderr, "Mapping failed: %#04x\n", errno);
+        } else { 
+            fprintf(stdout, "Mapped at: %p\n", addr);
+            
+            close(fd);            
+
+            fprintf(stdout, "Contents: %s\n", addr);
+
+            munmap(addr, KCDEV_BUF_SIZE);
+        }
+    }
+}
+
+int main() {
+    int i;
+
+    for (i = 0; i < KCDEV_DEFAULT_ENTRIES; ++i) {
+        test_write(i);
+        test_read(i);
+        test_mmap(i);
+        //test_ioctl(i);
+        //test_seek(i);
+    }
+ 
     return 0;
 }
