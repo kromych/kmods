@@ -21,22 +21,14 @@ static bool dump_stack_trace = false;
 module_param(dump_stack_trace, bool, 0644); // Permissions in /sysfs
 MODULE_PARM_DESC(dump_stack_trace, "Dumping stack traces");
 
-static int kmisc_open(struct inode *, struct file *);
-static int kmisc_release(struct inode *, struct file *);
-
-static const struct file_operations kmisc_file_ops = {
-    .owner   = THIS_MODULE,
-	.open    = kmisc_open,
-	.release = kmisc_release,
-};
-
 struct ring_buf {
-    spinlock_t lock;
+    spinlock_t read_lock;
+    spinlock_t write_lock;
     size_t size;
     atomic_t read_idx;
     atomic_t write_idx;
     struct page *pages;
-    u8 *buf;
+    void *buf;
 };
 
 static struct ring_buf *ring_buf_alloc(size_t page_count)
@@ -52,7 +44,8 @@ static struct ring_buf *ring_buf_alloc(size_t page_count)
 		goto fail;
 
 	ring->size = page_count * PAGE_SIZE;
-	spin_lock_init(&ring->lock);
+	spin_lock_init(&ring->read_lock);
+	spin_lock_init(&ring->write_lock);
 
 	ring->pages = alloc_pages(GFP_KERNEL, get_order(ring->size));
 
@@ -67,10 +60,10 @@ static struct ring_buf *ring_buf_alloc(size_t page_count)
 		double_map[i] = double_map[i + page_count] = &ring->pages[i];
 
 	ring->buf = vmap(double_map, page_count*2, VM_MAP, PAGE_KERNEL);
-    ring->buf[4096] = 0xAA;
-    ring->buf[4097] = 0xD1;
 
-    pr_info("ring buffer mapped at: %llx %#x %#x\n", (u64)&ring->buf[0], ring->buf[0], ring->buf[1]);
+    // ring->buf[4096] = 0xAA;
+    // ring->buf[4097] = 0xD1;
+    // pr_info("ring buffer mapped at: %llx %#x %#x\n", (u64)&ring->buf[0], ring->buf[0], ring->buf[1]);
 
 	if (!ring->buf)
 		goto fail;
@@ -110,6 +103,92 @@ static void ring_buf_free(struct ring_buf *ring)
     }
 }
 
+static ssize_t __ring_buf_read(struct ring_buf *ring, void* out_buf, size_t out_buf_size,
+                                bool user_buffer)
+{
+    off_t write_idx;
+    off_t read_idx;
+    off_t available_to_read;
+    off_t will_read;
+
+    spin_lock(&ring->read_lock);
+
+    write_idx = atomic_read_acquire(&ring->write_idx);
+    read_idx = atomic_read_acquire(&ring->read_idx);
+  
+    available_to_read = write_idx >= read_idx ?
+        write_idx - read_idx :
+        write_idx + ring->size - read_idx;
+    will_read = min((size_t)available_to_read, out_buf_size);
+
+    if (!user_buffer)
+        memcpy(out_buf, (u8*)ring->buf + read_idx, will_read);
+    else {
+        size_t nbytes_couldnt_copy = 
+            copy_to_user((void __force __user*)out_buf, (u8*)ring->buf + read_idx, will_read);
+        will_read -= nbytes_couldnt_copy;
+    }
+
+    atomic_set_release(&ring->read_idx, (read_idx + will_read) % ring->size);
+
+    spin_unlock(&ring->read_lock);
+
+    return will_read;
+}
+
+static ssize_t __maybe_unused ring_buf_read(struct ring_buf *ring, void* out_buf, size_t out_buf_size)
+{
+    return __ring_buf_read(ring, out_buf, out_buf_size, false);
+}
+
+static ssize_t __maybe_unused ring_buf_read_to_user(struct ring_buf *ring, void* out_buf, size_t out_buf_size)
+{
+    return __ring_buf_read(ring, out_buf, out_buf_size, true);
+}
+
+static ssize_t __ring_buf_write(struct ring_buf *ring, const void* in_buf, size_t in_buf_size,
+                                bool user_buffer)
+{
+    off_t write_idx;
+    off_t read_idx;
+    off_t available_to_write;
+    off_t will_write;
+
+    spin_lock(&ring->write_lock);
+
+    write_idx = atomic_read_acquire(&ring->write_idx);
+    read_idx = atomic_read_acquire(&ring->read_idx);
+ 
+    available_to_write = write_idx <= read_idx ?
+        read_idx - write_idx :
+        read_idx + ring->size - write_idx;
+    will_write = min((size_t)available_to_write, in_buf_size);
+
+    if (!user_buffer)
+        memcpy((u8*)ring->buf + write_idx, in_buf, will_write);
+    else {
+        size_t nbytes_couldnt_copy = 
+            copy_from_user((u8*)ring->buf + write_idx, (void __force __user*)in_buf, will_write);
+        will_write -= nbytes_couldnt_copy;
+    }
+
+    atomic_set_release(&ring->write_idx, (write_idx + will_write) % ring->size);
+
+    spin_unlock(&ring->write_lock);
+
+    return will_write;    
+}
+
+static ssize_t __maybe_unused ring_buf_write(struct ring_buf *ring, const void* in_buf, size_t in_buf_size)
+{
+    return __ring_buf_write(ring, in_buf, in_buf_size, false);
+}
+
+static ssize_t __maybe_unused ring_buf_write_from_user(struct ring_buf *ring, const void* in_buf, size_t in_buf_size)
+{
+    return __ring_buf_write(ring, in_buf, in_buf_size, true);
+}
+
 struct kmisc_dev {
     struct ring_buf *ring;
     struct miscdevice misc_dev;
@@ -127,7 +206,20 @@ static ssize_t __maybe_unused kmisc_attr_store(struct device *dev, struct device
 {
 	return strnlen(buf, count);
 }
-             
+
+static int kmisc_open(struct inode *, struct file *);
+static int kmisc_release(struct inode *, struct file *);
+static ssize_t kmisc_read(struct file *, char __user *, size_t, loff_t *);
+static ssize_t kmisc_write(struct file *, const char __user *, size_t, loff_t *);
+
+static const struct file_operations kmisc_file_ops = {
+    .owner   = THIS_MODULE,
+	.open    = kmisc_open,
+	.release = kmisc_release,
+    .read = kmisc_read,
+    .write = kmisc_write
+};
+
 static int kmisc_open(struct inode *inode, struct file *filp)
 {
     struct kmisc_dev* dev = container_of(filp->private_data,  struct kmisc_dev, misc_dev);
@@ -142,6 +234,20 @@ static int kmisc_release(struct inode *inode, struct file *filp)
 
     pr_info("Closing %s in %s\n", dev->misc_dev.name, __func__);
     return 0;
+}
+
+static ssize_t kmisc_read(struct file *filp, char __user *user_buf, size_t user_buf_size, loff_t *user_offset)
+{
+    struct kmisc_dev* dev = container_of(filp->private_data,  struct kmisc_dev, misc_dev);
+
+    return ring_buf_read_to_user(dev->ring, user_buf, user_buf_size);
+}
+
+static ssize_t kmisc_write(struct file *filp, const char __user *user_buf, size_t user_buf_size, loff_t *user_offset)
+{
+    struct kmisc_dev* dev = container_of(filp->private_data,  struct kmisc_dev, misc_dev);
+
+    return ring_buf_write_from_user(dev->ring, user_buf, user_buf_size);
 }
 
 static struct kmisc_dev *dev;
