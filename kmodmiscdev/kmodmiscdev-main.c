@@ -115,7 +115,10 @@ static ssize_t __ring_buf_read(struct ring_buf *ring, void* out_buf, size_t out_
 
     write_idx = atomic_read_acquire(&ring->write_idx);
     read_idx = atomic_read_acquire(&ring->read_idx);
-  
+
+    // If the indexes are equal, the buffer is empty,
+    // nothing is avalaible to read
+
     available_to_read = write_idx >= read_idx ?
         write_idx - read_idx :
         write_idx + ring->size - read_idx;
@@ -159,7 +162,10 @@ static ssize_t __ring_buf_write(struct ring_buf *ring, const void* in_buf, size_
     write_idx = atomic_read_acquire(&ring->write_idx);
     read_idx = atomic_read_acquire(&ring->read_idx);
  
-    available_to_write = write_idx <= read_idx ?
+    // If the indexes are equal, the buffer is empty,
+    // and all space is available to write
+
+    available_to_write = write_idx < read_idx ?
         read_idx - write_idx :
         read_idx + ring->size - write_idx;
     will_write = min((size_t)available_to_write, in_buf_size);
