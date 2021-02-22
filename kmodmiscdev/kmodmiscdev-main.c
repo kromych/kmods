@@ -212,7 +212,8 @@ struct kmisc_dev {
 static ssize_t __maybe_unused kmisc_attr_show(struct device *dev, struct device_attribute *attr,
         char *buf)
 {
-    return sprintf(buf, "%s\n", dev->init_name);
+    // cat /sys/devices/virtual/misc/kmisc/kmisc
+    return sprintf(buf, "Buffer size: %d bytes\n", KMISC_BUF_SIZE);
 }
 
 static ssize_t __maybe_unused kmisc_attr_store(struct device *dev, struct device_attribute *attr,
