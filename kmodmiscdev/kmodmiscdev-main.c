@@ -11,6 +11,8 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
+#include "kmodmiscdev.h"
+
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("kromych");
 MODULE_DESCRIPTION("misc char device example");
@@ -25,8 +27,8 @@ struct ring_buf {
     spinlock_t read_lock;
     spinlock_t write_lock;
     size_t size;
-    atomic_t read_idx;
-    atomic_t write_idx;
+    atomic64_t read_idx;
+    atomic64_t write_idx;
     struct page *pages;
     void *buf;
 };
@@ -113,16 +115,19 @@ static ssize_t __ring_buf_read(struct ring_buf *ring, void* out_buf, size_t out_
 
     spin_lock(&ring->read_lock);
 
-    write_idx = atomic_read_acquire(&ring->write_idx);
-    read_idx = atomic_read_acquire(&ring->read_idx);
+    write_idx = atomic64_read_acquire(&ring->write_idx);
+    read_idx = atomic64_read_acquire(&ring->read_idx);
 
     // If the indexes are equal, the buffer is empty,
     // nothing is avalaible to read
 
-    available_to_read = write_idx >= read_idx ?
-        write_idx - read_idx :
-        write_idx + ring->size - read_idx;
+    available_to_read = write_idx - read_idx;
+    if (available_to_read < 0)
+        available_to_read += ring->size;
     will_read = min((size_t)available_to_read, out_buf_size);
+
+    // Instead of modulo % as the size is a power of 2
+    read_idx &= (ring->size - 1);
 
     if (!user_buffer)
         memcpy(out_buf, (u8*)ring->buf + read_idx, will_read);
@@ -132,7 +137,7 @@ static ssize_t __ring_buf_read(struct ring_buf *ring, void* out_buf, size_t out_
         will_read -= nbytes_couldnt_copy;
     }
 
-    atomic_set_release(&ring->read_idx, (read_idx + will_read) % ring->size);
+    atomic64_add(will_read, &ring->read_idx);
 
     spin_unlock(&ring->read_lock);
 
@@ -159,16 +164,19 @@ static ssize_t __ring_buf_write(struct ring_buf *ring, const void* in_buf, size_
 
     spin_lock(&ring->write_lock);
 
-    write_idx = atomic_read_acquire(&ring->write_idx);
-    read_idx = atomic_read_acquire(&ring->read_idx);
+    write_idx = atomic64_read_acquire(&ring->write_idx);
+    read_idx = atomic64_read_acquire(&ring->read_idx);
  
     // If the indexes are equal, the buffer is empty,
     // and all space is available to write
 
-    available_to_write = write_idx < read_idx ?
-        read_idx - write_idx :
-        read_idx + ring->size - write_idx;
+    available_to_write = read_idx - write_idx;
+    if (available_to_write <= 0)
+        available_to_write += ring->size;
     will_write = min((size_t)available_to_write, in_buf_size);
+
+    // Instead of modulo % as the size is a power of 2
+    write_idx &= (ring->size - 1);
 
     if (!user_buffer)
         memcpy((u8*)ring->buf + write_idx, in_buf, will_write);
@@ -178,7 +186,7 @@ static ssize_t __ring_buf_write(struct ring_buf *ring, const void* in_buf, size_
         will_write -= nbytes_couldnt_copy;
     }
 
-    atomic_set_release(&ring->write_idx, (write_idx + will_write) % ring->size);
+    atomic64_add(will_write, &ring->write_idx);
 
     spin_unlock(&ring->write_lock);
 
@@ -267,13 +275,13 @@ static int __init init_kmisc_example(void)
     if (!dev)
         return -ENOMEM;
 
-    dev->ring = ring_buf_alloc(1);
+    dev->ring = ring_buf_alloc(KMISC_BUF_SIZE/PAGE_SIZE);
 
     if (!dev->ring)
         return -ENOMEM;
 
     dev->misc_dev.minor = MISC_DYNAMIC_MINOR;
-	dev->misc_dev.name = "kmisc";
+	dev->misc_dev.name = KMISC_NAME;
 	dev->misc_dev.nodename = dev->misc_dev.name;
 	dev->misc_dev.fops = &kmisc_file_ops;
 	dev->misc_dev.mode = 0755;
