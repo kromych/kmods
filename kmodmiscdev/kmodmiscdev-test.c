@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -57,19 +58,21 @@ static void test_read_write(void) {
         for (j = 0; j < sizeof data/sizeof data[0]; ++j) {
             ASSERT(read(fd, buffer, j + 1) == 0);
 
-            ASSERT(write(fd, data[j], j + 1) == j + 1);
-            ASSERT(write(fd, buffer, KMISC_BUF_SIZE) == KMISC_BUF_SIZE - (j + 1));
+            ASSERT(write(fd, data[j], j + 2) == j + 2);
+            ASSERT(write(fd, buffer, KMISC_BUF_SIZE) == KMISC_BUF_SIZE - (j + 2));
             ASSERT(write(fd, data[j], 1) == 0);
-            ASSERT(read(fd, buffer, KMISC_BUF_SIZE - (j + 1)) == KMISC_BUF_SIZE - (j + 1));
+            ASSERT(read(fd, buffer, j + 2) == j + 2);
+            ASSERT(read(fd, buffer, KMISC_BUF_SIZE - (j + 2)) == KMISC_BUF_SIZE - (j + 2));
 
-            ASSERT(write(fd, data[j], j + 1) == j + 1);
-            ASSERT(write(fd, data[j], j + 1) == j + 1);
+            ASSERT(write(fd, data[j], j + 2) == j + 2);
+            ASSERT(write(fd, data[j], j + 2) == j + 2);
 
-            ASSERT(read(fd, buffer, j + 1) == j + 1);
-            ASSERT(read(fd, buffer, j + 1) == j + 1);
-            ASSERT(read(fd, buffer, j + 1) == j + 1);
+            ASSERT(read(fd, buffer, j + 2) == j + 2);
+            ASSERT(strcmp(data[j], buffer) == 0);
+            ASSERT(read(fd, buffer, j + 2) == j + 2);
+            ASSERT(strcmp(data[j], buffer) == 0);
 
-            ASSERT(read(fd, buffer, j + 1) == 0);
+            ASSERT(read(fd, buffer, 1) == 0);
         }
     }
 
