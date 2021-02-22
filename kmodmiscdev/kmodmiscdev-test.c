@@ -62,6 +62,7 @@ static void test_read_write(void) {
             ASSERT(write(fd, buffer, KMISC_BUF_SIZE) == KMISC_BUF_SIZE - (j + 2));
             ASSERT(write(fd, data[j], 1) == 0);
             ASSERT(read(fd, buffer, j + 2) == j + 2);
+            ASSERT(strcmp(data[j], buffer) == 0);
             ASSERT(read(fd, buffer, KMISC_BUF_SIZE - (j + 2)) == KMISC_BUF_SIZE - (j + 2));
 
             ASSERT(write(fd, data[j], j + 2) == j + 2);
