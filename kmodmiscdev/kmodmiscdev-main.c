@@ -41,7 +41,7 @@ static struct ring_buf *ring_buf_alloc(size_t page_count)
 
 	double_map = NULL;
 
-	ring = kmalloc(sizeof(struct ring_buf), GFP_KERNEL);
+	ring = kzalloc(sizeof(struct ring_buf), GFP_KERNEL);
 	if (!ring)
 		goto fail;
 
