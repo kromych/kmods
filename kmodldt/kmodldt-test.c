@@ -1,9 +1,11 @@
+#define _GNU_SOURCE 
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sched.h>
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -25,50 +27,81 @@ struct lcall_addr {
     unsigned short sel;
 } __attribute__((packed));
 
+void __attribute__((__unused__)) affinitize(void)
+{
+	cpu_set_t set;
+
+    CPU_ZERO(&set);
+    CPU_SET(0, &set);
+	ASSERT(sched_setaffinity(getpid(), sizeof(set), &set) == 0);
+}
+
 static struct lcall_addr addr;
 
 int main() {
-    
-	char *target = mmap(
+    int fd = -1;
+	char *target = NULL;
+	int ldt_index = 0;
+	unsigned char rpl = 3;
+
+	// Open our special device
+	fd = open("/dev/" KLDT_NAME, O_RDWR);
+	ASSERT(fd >= 0);
+
+	// Allocate memory
+	target = mmap(
 		NULL, 0x1000,
 		PROT_READ | PROT_WRITE | PROT_EXEC,
 		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
 	ASSERT(target != MAP_FAILED);
-
-    target[0] = 0x90; // NOP
-    target[1] = 0xC3; // RET
-
 	printf("base address: %#lx\n", (unsigned long)target);
 
+	// See if possible to execute anything on the page
+	target[0] = 0x90; // NOP
+    target[1] = 0xC3; // RET
+    addr.offset = (unsigned long)target;
+    addr.sel = 0; // Only matters for the long call
+    asm volatile ("call *addr\n");
+
+	// Time to setup the LDT.
+    // Reserve space for a long descriptor by setting two short ones
+    // of type 0xC (call gate). The syscall code only allows that when
+    // the non-present segment bit is set.
 	struct user_desc desc = {
 		.limit           = 0xfff,
+		.base_addr 		 = (unsigned long)target & 0xffffffff,
 		.seg_32bit       = 0,
-		.contents        = 3,
+		.contents        = 0xC >> 2,
 		.read_exec_only  = 1,
 		.limit_in_pages  = 1,
 		.seg_not_present = 1,
 		.useable         = 1,
 	};
-
-    // Reserve space for a long descriptor by setting two short ones
-    desc.entry_number = 0;
-	desc.base_addr = (unsigned long)target & 0xffffffff;
+    desc.entry_number = ldt_index;
 	ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
-    desc.entry_number = 1;
-	desc.base_addr = (unsigned long)target >> 32;
+    desc.entry_number = ldt_index + 1;
 	ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
 
-    addr.offset = (unsigned long)target;
-    addr.sel = 0; // Only matters for the long call
+	struct setup_gate gate = {
+		.base = (unsigned long)target, // Can a compiled function, too, of course
+		.idx = ldt_index,
+		.rpl = rpl
+	};
+	
+	ASSERT(ioctl(fd, KLDT_IOCTL_SETUP_GATE, &gate) == 0);
 
-    asm volatile (
-        "call *addr\n"
-    );
+	// Segment selector (what goes into a segment register):
+	// 	0:1     RPL (request priviledge)
+	// 	2       Table (0 - GDT, 1 - LDT)
+	// 	3:15    Index in the descriptor table
 
-    asm volatile (
-        "lcall *addr\n"
-    );
+	target[0] = 0x90; // NOP
+    target[1] = rpl == 3 ? 0xC3 : 0xCB /*LRET*/; // LRET is needed for a priveledge-changing call
+    addr.offset = 0; // Ignored for the long call
+    addr.sel = (gate.idx << 3) | 4 /*LDT*/ | (rpl & 0x3);
+
+	// rex.w means the offset part has 64 bits
+    asm volatile ("rex.w lcall *(addr)\n");
 
     return 0;
 }
