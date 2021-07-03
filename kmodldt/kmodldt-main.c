@@ -12,8 +12,10 @@
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <linux/uaccess.h>
 
 #include <asm/segment.h>
+#include <asm/ldt.h>
 
 #include <generated/autoconf.h>
 
@@ -23,6 +25,13 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("kromych");
 MODULE_DESCRIPTION("kldt char device example");
 MODULE_VERSION("0.01");
+
+#define dump_hex(prefix, buf, len) \
+	{ \
+		print_hex_dump(KERN_INFO, prefix, \
+				DUMP_PREFIX_ADDRESS, 16, 1, (buf), (len), true); \
+		pr_info("\n"); \
+	}
 
 /* The 64-bit call gate descriptor, type == 0xC */
 struct call_gate_64 {
@@ -73,6 +82,8 @@ static void flush_ldt(void *__mm)
     } else {
         set_ldt(ldt->entries, ldt->nr_entries);
     }
+
+    dump_hex("LDT ", ldt->entries, 32);
 }
 
 static bool dump_stack_trace = false;
