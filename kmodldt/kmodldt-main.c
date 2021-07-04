@@ -46,7 +46,7 @@ struct call_gate_64 {
 struct ldt_struct {
 	unsigned long   *entries;
 	unsigned int    nr_entries;
-	int			    slot;    
+	int			    slot;
 };
 
 /* This is a multiple of PAGE_SIZE. */
@@ -149,11 +149,14 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
         // prior to calling here. The syscall code only allows that when
         // the non-present segment bit is set.
 
-        pr_info("base address %#lx, index %d\n", gate.base, gate.idx);
-        pr_info("%d entries in LDT\n", ldt->nr_entries);
+        pr_info("base address %#lx, index %d, rpl %d\n", gate.base, gate.idx, gate.rpl);
+        pr_info("%d entries in LDT, USER_CS %#x, KERNEL_CS %#x\n", ldt->nr_entries, __USER_CS, __KERNEL_CS);
 
         if (entry_idx + 2 <= ldt->nr_entries) {
             struct call_gate_64 *gate_desc = (struct call_gate_64*)&ldt->entries[entry_idx];
+
+            ldt->entries[entry_idx] = 0;
+            ldt->entries[entry_idx+1] = 0;
 
         	gate_desc->offset0 = gate.base & 0xffff;
 	        gate_desc->target_sel = gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
