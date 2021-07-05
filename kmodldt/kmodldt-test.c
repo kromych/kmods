@@ -44,6 +44,8 @@ int main() {
     int ldt_index = 0;
     unsigned char rpl = 3;
 
+    affinitize();
+
     // Open our special device
     fd = open("/dev/" KLDT_NAME, O_RDWR);
     ASSERT(fd >= 0);
@@ -65,7 +67,7 @@ int main() {
 
     // Time to setup the LDT.
     // Reserve space for a long descriptor by setting two short ones
-    // of any type.
+    // of any type, and the third one for the code segment.
     struct user_desc desc = {
         .limit           = 0xfff,
         .base_addr       = 0xffffffff,
@@ -79,6 +81,8 @@ int main() {
     desc.entry_number = ldt_index;
     ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
     desc.entry_number = ldt_index + 1;
+    ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
+    desc.entry_number = ldt_index + 2;
     ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
 
     struct setup_gate gate = {

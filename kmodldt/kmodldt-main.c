@@ -152,14 +152,25 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
         pr_info("base address %#lx, index %d, rpl %d\n", gate.base, gate.idx, gate.rpl);
         pr_info("%d entries in LDT, USER_CS %#x, KERNEL_CS %#x\n", ldt->nr_entries, __USER_CS, __KERNEL_CS);
 
-        if (entry_idx + 2 <= ldt->nr_entries) {
+        if (entry_idx + 3 <= ldt->nr_entries) {
             struct call_gate_64 *gate_desc = (struct call_gate_64*)&ldt->entries[entry_idx];
+
+            // In case of relying on GDT entries: gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
+            u16 target_sel = ((entry_idx+2) << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
+            pr_info("Target selector: %#x\n", target_sel);
 
             ldt->entries[entry_idx] = 0;
             ldt->entries[entry_idx+1] = 0;
+            ldt->entries[entry_idx+2] = 0x00affb000000ffffULL; // Ring 3 long code segment
+            // Ring 0 long code segment: 0x00af9b000000ffff
+
+            // Segment selector (what goes into a segment register):
+            //  0:1     RPL (request priviledge)
+            //  2       Table (0 - GDT, 1 - LDT)
+            //  3:15    Index in the descriptor table
 
             gate_desc->offset0 = gate.base & 0xffff;
-            gate_desc->target_sel = gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
+            gate_desc->target_sel = target_sel;
             gate_desc->zero0 = 0;
             gate_desc->type = 0xC; // 64-bit call gate
             gate_desc->dpl = gate.rpl;
