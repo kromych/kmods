@@ -41,6 +41,7 @@ static struct lcall_addr addr;
 int main() {
     int fd = -1;
     char *target = NULL;
+    char *code_start = NULL;
     int ldt_index = 0;
     unsigned char rpl = 3;
 
@@ -52,16 +53,18 @@ int main() {
 
     // Allocate memory
     target = mmap(
-        NULL, 0x1000,
+        NULL, 0x2000,
         PROT_READ | PROT_WRITE | PROT_EXEC,
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     ASSERT(target != MAP_FAILED);
     printf("base address: %#lx\n", (unsigned long)target);
 
+    code_start = target + 0x800;
+
     // See if possible to execute anything on the page
-    target[0] = 0x90; // NOP
-    target[1] = 0xC3; // RET
-    addr.offset = (unsigned long)target;
+    code_start[0] = 0x90; // NOP
+    code_start[1] = 0xC3; // RET
+    addr.offset = (unsigned long)code_start;
     addr.sel = 0; // Only matters for the long call
     asm volatile ("call *addr\n");
 
@@ -86,7 +89,7 @@ int main() {
     ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
 
     struct setup_gate gate = {
-        .base = (unsigned long)target, // Can a compiled function, too, of course
+        .base = (unsigned long)code_start, // Can a compiled function, too, of course
         .idx = ldt_index,
         .rpl = rpl
     };
@@ -98,9 +101,9 @@ int main() {
     //  2       Table (0 - GDT, 1 - LDT)
     //  3:15    Index in the descriptor table
 
-    target[0] = 0x90; // NOP
-    target[1] = rpl == 3 ? 0xC3 : 0xCB /*LRET*/; // LRET is needed for a priveledge-changing call
-    addr.offset = 0; // Ignored for the long call
+    code_start[0] = 0x90; // NOP
+    code_start[1] = rpl == 3 ? 0xC3 : 0xCB /*LRET*/; // LRET is needed for a priveledge-changing call
+    //addr.offset = 0; // Ignored for the long call
     addr.sel = (gate.idx << 3) | 4 /*LDT*/ | (rpl & 0x3);
 
     // rex.w means the offset part has 64 bits

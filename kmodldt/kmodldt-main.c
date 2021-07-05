@@ -154,15 +154,23 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
 
         if (entry_idx + 3 <= ldt->nr_entries) {
             struct call_gate_64 *gate_desc = (struct call_gate_64*)&ldt->entries[entry_idx];
-
+            u32 *second_dword;
             // In case of relying on GDT entries: gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
             u16 target_sel = ((entry_idx+2) << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
-            pr_info("Target selector: %#x\n", target_sel);
 
             ldt->entries[entry_idx] = 0;
             ldt->entries[entry_idx+1] = 0;
             ldt->entries[entry_idx+2] = 0x00affb000000ffffULL; // Ring 3 long code segment
             // Ring 0 long code segment: 0x00af9b000000ffff
+
+            second_dword = (u32*)&ldt->entries[entry_idx+2];
+            second_dword++;
+
+            *second_dword |= (1ULL<<10); // Conforming
+            *second_dword &= ~(1ULL<<9); // Read
+            *second_dword &= ~(1ULL<<8); // Accessed
+
+            pr_info("Target selector: %#x; descriptror %#lx\n", target_sel, ldt->entries[entry_idx+2]);
 
             // Segment selector (what goes into a segment register):
             //  0:1     RPL (request priviledge)
