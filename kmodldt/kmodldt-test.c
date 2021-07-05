@@ -23,7 +23,7 @@
 #define ASSERT(cond) ASSERT2(cond, #cond)
 
 struct lcall_addr {
-    unsigned long offset;
+    unsigned int offset;
     unsigned short sel;
 } __attribute__((packed));
 
@@ -37,13 +37,14 @@ void __attribute__((__unused__)) affinitize(void)
 }
 
 static struct lcall_addr addr;
+static char *code_start;
 
 int main() {
     int fd = -1;
     char *target = NULL;
-    char *code_start = NULL;
     int ldt_index = 0;
     unsigned char rpl = 3;
+    unsigned short sel;
 
     affinitize();
 
@@ -64,9 +65,7 @@ int main() {
     // See if possible to execute anything on the page
     code_start[0] = 0x90; // NOP
     code_start[1] = 0xC3; // RET
-    addr.offset = (unsigned long)code_start;
-    addr.sel = 0; // Only matters for the long call
-    asm volatile ("call *addr\n");
+    asm volatile ("call *code_start\n");
 
     // Time to setup the LDT.
     // Reserve space for a long descriptor by setting two short ones
@@ -100,14 +99,16 @@ int main() {
     //  0:1     RPL (request priviledge)
     //  2       Table (0 - GDT, 1 - LDT)
     //  3:15    Index in the descriptor table
+    sel = (gate.idx << 3) | 4 /*LDT*/ | (rpl & 0x3);
 
     code_start[0] = 0x90; // NOP
     code_start[1] = rpl == 3 ? 0xC3 : 0xCB /*LRET*/; // LRET is needed for a priveledge-changing call
-    //addr.offset = 0; // Ignored for the long call
-    addr.sel = (gate.idx << 3) | 4 /*LDT*/ | (rpl & 0x3);
+    addr.offset = 0; // Ignored for the long call
+    addr.sel = sel;
 
-    // rex.w means the offset part has 64 bits
-    asm volatile ("rex.w lcall *(addr)\n");
+    // Adding rex.w would've meant the offset part has 64 bits.
+    // That works on Intel parts but not on the AMD ones.
+    asm volatile ("lcall *(addr)\n");
 
     return 0;
 }
