@@ -36,7 +36,7 @@ void __attribute__((__unused__)) affinitize(void)
     ASSERT(sched_setaffinity(getpid(), sizeof(set), &set) == 0);
 }
 
-static struct lcall_addr addr;
+static struct lcall_addr lcall_addr;
 static char *code_start;
 
 int main() {
@@ -103,12 +103,12 @@ int main() {
 
     code_start[0] = 0x90; // NOP
     code_start[1] = rpl == 3 ? 0xC3 : 0xCB /*LRET*/; // LRET is needed for a priveledge-changing call
-    addr.offset = 0; // Ignored for the long call
-    addr.sel = sel;
+    lcall_addr.offset = 0; // Ignored for the long call
+    lcall_addr.sel = sel;
 
     // Adding rex.w would've meant the offset part has 64 bits.
     // That works on Intel parts but not on the AMD ones.
-    asm volatile ("lcall *(addr)\n");
+    asm volatile ("lcall *(lcall_addr)\n");
 
     return 0;
 }
