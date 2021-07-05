@@ -6,8 +6,8 @@ default: $(BUILD_DIR_MAKEFILE)
 	-rm $(PWD)/../kinclude
 	-rm -rf $(PWD)/../kasm
 	-mkdir -p $(PWD)/../kasm
-	-ln -rs $(KDIR)/include $(PWD)/../kinclude
-	-ln -rs $(KDIR)/include/asm-generic $(PWD)/../kasm/asm
+	-ln -s $(KDIR)/include $(PWD)/../kinclude
+	-ln -s $(KDIR)/include/asm-generic $(PWD)/../kasm/asm
 	make -C $(KDIR) M=$(BUILD_DIR) src=$(PWD) modules
 	gcc kmodldt-test.c -o $(BUILD_DIR)/kmodldt-test -fPIE -static -ggdb3
 

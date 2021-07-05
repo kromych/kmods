@@ -27,26 +27,26 @@ MODULE_DESCRIPTION("kldt char device example");
 MODULE_VERSION("0.01");
 
 #define dump_hex(prefix, buf, len) \
-	{ \
-		print_hex_dump(KERN_INFO, prefix, \
-				DUMP_PREFIX_ADDRESS, 16, 1, (buf), (len), true); \
-		pr_info("\n"); \
-	}
+    { \
+        print_hex_dump(KERN_INFO, prefix, \
+                DUMP_PREFIX_ADDRESS, 16, 1, (buf), (len), true); \
+        pr_info("\n"); \
+    }
 
 /* The 64-bit call gate descriptor, type == 0xC */
 struct call_gate_64 {
-	u16	offset0;
-	u16	target_sel;
-	u16	zero0 : 8, type : 5, dpl : 2, p : 1;
-	u16	offset1;
-	u32	offset2;
-	u32	zero1;
+    u16 offset0;
+    u16 target_sel;
+    u16 zero0 : 8, type : 5, dpl : 2, p : 1;
+    u16 offset1;
+    u32 offset2;
+    u32 zero1;
 } __attribute__((packed));
 
 struct ldt_struct {
-	unsigned long   *entries;
-	unsigned int    nr_entries;
-	int			    slot;
+    unsigned long   *entries;
+    unsigned int    nr_entries;
+    int             slot;
 };
 
 /* This is a multiple of PAGE_SIZE. */
@@ -54,17 +54,17 @@ struct ldt_struct {
 
 static inline void *ldt_slot_va(int slot)
 {
-	return (void *)(LDT_BASE_ADDR + LDT_SLOT_STRIDE * slot);
+    return (void *)(LDT_BASE_ADDR + LDT_SLOT_STRIDE * slot);
 }
 
 static void flush_ldt(void *__mm)
 {
-	struct mm_struct *mm = __mm;
-	struct ldt_struct *ldt;
+    struct mm_struct *mm = __mm;
+    struct ldt_struct *ldt;
 
     //asm volatile("lldt %w0"::"q" (GDT_ENTRY_LDT*8));
 
-	ldt = READ_ONCE(mm->context.ldt);
+    ldt = READ_ONCE(mm->context.ldt);
 
     // If page table isolation is enabled, ldt->entries
     // will not be mapped in the userspace pagetables.
@@ -103,7 +103,7 @@ static ssize_t __maybe_unused kldt_attr_show(struct device *dev, struct device_a
 static ssize_t __maybe_unused kldt_attr_store(struct device *dev, struct device_attribute *attr,
             const char *buf, size_t count)
 {
-	return strnlen(buf, count);
+    return strnlen(buf, count);
 }
 
 static int kldt_open(struct inode *, struct file *);
@@ -112,8 +112,8 @@ static long kldt_ioctl(struct file *, unsigned int, unsigned long);
 
 static const struct file_operations kldt_file_ops = {
     .owner   = THIS_MODULE,
-	.open    = kldt_open,
-	.release = kldt_release,
+    .open    = kldt_open,
+    .release = kldt_release,
     .unlocked_ioctl = kldt_ioctl,
 };
 
@@ -138,9 +138,9 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
     }
 
     if (down_write_killable(&mm->context.ldt_usr_sem))
-		return -EINTR;
+        return -EINTR;
 
-	ldt = READ_ONCE(mm->context.ldt);
+    ldt = READ_ONCE(mm->context.ldt);
 
     if (ldt) {
         int entry_idx = gate.idx;
@@ -158,8 +158,8 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
             ldt->entries[entry_idx] = 0;
             ldt->entries[entry_idx+1] = 0;
 
-        	gate_desc->offset0 = gate.base & 0xffff;
-	        gate_desc->target_sel = gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
+            gate_desc->offset0 = gate.base & 0xffff;
+            gate_desc->target_sel = gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
             gate_desc->zero0 = 0;
             gate_desc->type = 0xC; // 64-bit call gate
             gate_desc->dpl = gate.rpl;
@@ -168,9 +168,9 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
             gate_desc->offset2 = gate.base >> 32;
             gate_desc->zero1 = 0;
 
-	        mutex_lock(&mm->context.lock);
-	        on_each_cpu_mask(mm_cpumask(mm), flush_ldt, mm, true);
-	        mutex_unlock(&mm->context.lock);
+            mutex_lock(&mm->context.lock);
+            on_each_cpu_mask(mm_cpumask(mm), flush_ldt, mm, true);
+            mutex_unlock(&mm->context.lock);
 
             err = 0;
         } else {
@@ -182,7 +182,7 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
         err = -ENOTSUPP;
     }
 
-	up_write(&mm->context.ldt_usr_sem);
+    up_write(&mm->context.ldt_usr_sem);
 
     schedule();
 
@@ -220,10 +220,10 @@ static int __init init_kldt_example(void)
         return -ENOMEM;
 
     dev->misc_dev.minor = MISC_DYNAMIC_MINOR;
-	dev->misc_dev.name = KLDT_NAME;
-	dev->misc_dev.nodename = dev->misc_dev.name;
-	dev->misc_dev.fops = &kldt_file_ops;
-	dev->misc_dev.mode = 0755;
+    dev->misc_dev.name = KLDT_NAME;
+    dev->misc_dev.nodename = dev->misc_dev.name;
+    dev->misc_dev.fops = &kldt_file_ops;
+    dev->misc_dev.mode = 0755;
     dev->attr.attr.name = dev->misc_dev.name;
     dev->attr.attr.mode = dev->misc_dev.mode;
     dev->attr.show = kldt_attr_show;
