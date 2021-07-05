@@ -166,11 +166,11 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
             second_dword = (u32*)&ldt->entries[entry_idx+2];
             second_dword++;
 
-            *second_dword |= (1ULL<<10); // Conforming
-            *second_dword &= ~(1ULL<<9); // Read
+            *second_dword &= ~(1ULL<<10); // Non-conforming
+            *second_dword |= (1ULL<<9); // Read
             *second_dword &= ~(1ULL<<8); // Accessed
 
-            pr_info("Target selector: %#x; descriptror %#lx\n", target_sel, ldt->entries[entry_idx+2]);
+            pr_info("Target selector: %#x; descriptor %#lx\n", target_sel, ldt->entries[entry_idx+2]);
 
             // Segment selector (what goes into a segment register):
             //  0:1     RPL (request priviledge)
