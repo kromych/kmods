@@ -130,11 +130,71 @@ void test_same_priviledge(void)
 
 void test_ring0(void)
 {
+    const unsigned short ldt_index = 4;
+    const unsigned char  rpl = 0;
+
+    // Segment selector (what goes into a segment register):
+    //  0:1     RPL (request priviledge)
+    //  2       Table (0 - GDT, 1 - LDT)
+    //  3:15    Index in the descriptor table
+    const unsigned short sel = (ldt_index << 3) | 4 /*LDT*/ | (rpl & 0x3);
+
+    struct user_desc    desc = {
+        .limit           = 0xfff,
+        .base_addr       = 0xffffffff,
+        .seg_32bit       = 1,
+        .contents        = 0,
+        .read_exec_only  = 1,
+        .limit_in_pages  = 1,
+        .seg_not_present = 0,
+        .useable         = 0,
+    };
+    struct setup_gate gate = {
+        .base = 0, // the kernel will allocate memory
+        .idx = ldt_index,
+        .rpl = rpl
+    };   
+    struct lcall_addr lcall_addr = {
+        .offset = 0, // Ignored for far calls
+        .sel = sel
+    };
+
+    int fd = -1;
+
+    // Open our special device
+
+    fd = open("/dev/" KLDT_NAME, O_RDWR);
+    ASSERT(fd >= 0);
+
+    // Time to setup the LDT.
+    // Reserve space for a long descriptor by setting two short ones
+    // of any type, and the third one for the code segment.
+
+    desc.entry_number = ldt_index;
+    ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
+    desc.entry_number = ldt_index + 1;
+    ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
+    desc.entry_number = ldt_index + 2;
+    ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
+
+    ASSERT(ioctl(fd, KLDT_IOCTL_SETUP_GATE, &gate) == 0);
+
+    // Adding rex.w would've meant the offset part has 64 bits.
+    // That works on Intel parts but not on the AMD ones.
+    asm volatile (
+        "leaq   %0, %%rax\n"
+        "lcall  *(%%rax)\n"
+        : : "m"(lcall_addr) : "rax"
+    );
 }
 
 int main()
 {
+    puts("Testing call gate b/w same priviledge");
     test_same_priviledge();
+
+    //puts("Testing call gate into ring 0");
+    //test_ring0();
 
     return 0;
 }

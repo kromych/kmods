@@ -137,6 +137,16 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
         return -EINVAL;
     }
 
+    if (gate.rpl != 0 && gate.rpl != 3) {
+        pr_err("can use rpl 0 or 3\n");
+        return -EINVAL;
+    }
+
+    if (gate.rpl == 0 && gate.base != 0) {
+        pr_err("for rpl 0, base will be ingnored\n");
+        return -EINVAL;
+    }
+
     if (down_write_killable(&mm->context.ldt_usr_sem))
         return -EINTR;
 
@@ -145,11 +155,10 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
     if (ldt) {
         int entry_idx = gate.idx;
 
-        // The um must set two short descriptors of type 0xC (call gate)
-        // prior to calling here. The syscall code only allows that when
-        // the non-present segment bit is set.
+        // The um must set three short descriptors of any type
+        // prior to calling here. They will be reused for a long
+        // gate descriptor (spans 2 ones) and the code descriptor.
 
-        pr_info("base address %#lx, index %d, rpl %d\n", gate.base, gate.idx, gate.rpl);
         pr_info("%d entries in LDT, USER_CS %#x, KERNEL_CS %#x\n", ldt->nr_entries, __USER_CS, __KERNEL_CS);
 
         if (entry_idx + 3 <= ldt->nr_entries) {
@@ -158,17 +167,51 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
             // In case of relying on GDT entries: gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
             u16 target_sel = ((entry_idx+2) << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
 
+            if (gate.rpl == 0) {
+                char        *target = NULL;
+	            struct page *pg = alloc_pages(GFP_KERNEL, get_order(0x1000)); // TODO: free it
+
+                if (!pg) {
+                    pr_err("could not allocate page\n");
+                    err = -ENOMEM;
+                    goto exit;
+                }
+
+                target = vmap(&pg, 1, VM_MAP, PAGE_KERNEL); // __PAGE_KERNEL_EXEC
+                if (!target) {
+                    pr_err("could not map the page as kernel r/w nx\n");
+                    err = -ENOMEM;
+                    goto exit;
+                }
+
+                target[0] = 0x90; // NOP
+                target[1] = 0xCB; // LRET
+                
+                vunmap(target);
+
+                target = vmap(&pg, 1, VM_MAP, PAGE_READONLY_EXEC);
+                if (!target) {
+                    pr_err("could not map the page as kernel r/o x\n");
+                    err = -ENOMEM;
+                    goto exit;
+                }
+
+                gate.base = (unsigned long)target;
+            }
+
+            pr_info("base address %#lx, index %d, rpl %d\n", gate.base, gate.idx, gate.rpl);
+
             ldt->entries[entry_idx] = 0;
             ldt->entries[entry_idx+1] = 0;
-            ldt->entries[entry_idx+2] = 0x00affb000000ffffULL; // Ring 3 long code segment
-            // Ring 0 long code segment: 0x00af9b000000ffff
+            ldt->entries[entry_idx+2] = 
+                gate.rpl == 3 ? 0x00affb000000ffffULL : 0x00af9b000000ffffULL; // The lazy way
 
             second_dword = (u32*)&ldt->entries[entry_idx+2];
             second_dword++;
 
-            *second_dword &= ~(1ULL<<10); // Non-conforming
-            *second_dword |= (1ULL<<9); // Read
-            *second_dword &= ~(1ULL<<8); // Accessed
+            *second_dword &= ~(1ULL<<10); // !Conforming
+            *second_dword &= ~(1ULL<<9); // !Read
+            *second_dword &= ~(1ULL<<8); // !Accessed
 
             pr_info("Target selector: %#x; descriptor %#lx\n", target_sel, ldt->entries[entry_idx+2]);
 
@@ -200,6 +243,8 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
         pr_err("LDT is not allocated\n");
         err = -ENOTSUPP;
     }
+
+exit:
 
     up_write(&mm->context.ldt_usr_sem);
 
