@@ -117,6 +117,14 @@ static const struct file_operations kldt_file_ops = {
     .unlocked_ioctl = kldt_ioctl,
 };
 
+static void __attribute__((naked)) __gate_entry(void)
+{
+    asm volatile (
+        "nop\n"
+        "lret\n"
+    );
+}
+
 static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
 {
     struct mm_struct *mm = current->mm;
@@ -177,35 +185,36 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
             //const u16 target_sel = ((entry_idx+2) << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
 
             if (gate.rpl == 0) {
-                char        *target = NULL;
-	            struct page *pg = alloc_pages(GFP_KERNEL, get_order(0x1000)); // TODO: free it
+                // char        *target = NULL;
+	            // struct page *pg = alloc_pages(GFP_KERNEL, get_order(0x1000)); // TODO: free it
 
-                if (!pg) {
-                    pr_err("could not allocate page\n");
-                    err = -ENOMEM;
-                    goto exit;
-                }
+                // if (!pg) {
+                //     pr_err("could not allocate page\n");
+                //     err = -ENOMEM;
+                //     goto exit;
+                // }
 
-                target = vmap(&pg, 1, VM_MAP, PAGE_KERNEL); // __PAGE_KERNEL_EXEC
-                if (!target) {
-                    pr_err("could not map the page as kernel r/w nx\n");
-                    err = -ENOMEM;
-                    goto exit;
-                }
+                // target = vmap(&pg, 1, VM_MAP, PAGE_KERNEL); // __PAGE_KERNEL_EXEC
+                // if (!target) {
+                //     pr_err("could not map the page as kernel r/w nx\n");
+                //     err = -ENOMEM;
+                //     goto exit;
+                // }
 
-                target[0] = 0x90; // NOP
-                target[1] = 0xCB; // LRET
+                // target[0] = 0x90; // NOP
+                // target[1] = 0xCB; // LRET
                 
-                vunmap(target);
+                // vunmap(target);
 
-                target = vmap(&pg, 1, VM_MAP, PAGE_READONLY_EXEC);
-                if (!target) {
-                    pr_err("could not map the page as kernel r/o x\n");
-                    err = -ENOMEM;
-                    goto exit;
-                }
+                // target = vmap(&pg, 1, VM_MAP, PAGE_READONLY_EXEC);
+                // if (!target) {
+                //     pr_err("could not map the page as kernel r/o x\n");
+                //     err = -ENOMEM;
+                //     goto exit;
+                // }
 
-                gate.base = (unsigned long)target;
+                // gate.base = (unsigned long)target;
+                gate.base = (unsigned long)__gate_entry;
             }
 
             pr_info("base address %#lx, index %d, rpl %d\n", gate.base, gate.idx, gate.rpl);
