@@ -164,8 +164,17 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
         if (entry_idx + 3 <= ldt->nr_entries) {
             struct call_gate_64 *gate_desc = (struct call_gate_64*)&ldt->entries[entry_idx];
             u32 *second_dword;
-            // In case of relying on GDT entries: gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
-            u16 target_sel = ((entry_idx+2) << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
+
+            // Segment selector (what goes into a segment register):
+            //  0:1     RPL (request priviledge)
+            //  2       Table (0 - GDT, 1 - LDT)
+            //  3:15    Index in the descriptor table
+            const u16 gate_sel = (entry_idx << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
+
+            // In case of relying on GDT entries:
+            const u16 target_sel = gate.rpl == 3 ? __USER_CS : __KERNEL_CS;
+            // In case of relying on LDT entries created below:
+            //const u16 target_sel = ((entry_idx+2) << 3) | 4 /*LDT*/ | (gate.rpl & 0x3);
 
             if (gate.rpl == 0) {
                 char        *target = NULL;
@@ -213,18 +222,14 @@ static long kldt_ioctl(struct file *filp, unsigned int cmd, unsigned long param)
             *second_dword &= ~(1ULL<<9); // !Read
             *second_dword &= ~(1ULL<<8); // !Accessed
 
-            pr_info("Target selector: %#x; descriptor %#lx\n", target_sel, ldt->entries[entry_idx+2]);
-
-            // Segment selector (what goes into a segment register):
-            //  0:1     RPL (request priviledge)
-            //  2       Table (0 - GDT, 1 - LDT)
-            //  3:15    Index in the descriptor table
+            pr_info("Gate selector: %#x; target selector: %#x, target descriptor %#lx\n",
+                gate_sel, target_sel, ldt->entries[entry_idx+2]);
 
             gate_desc->offset0 = gate.base & 0xffff;
             gate_desc->target_sel = target_sel;
             gate_desc->zero0 = 0;
             gate_desc->type = 0xC; // 64-bit call gate
-            gate_desc->dpl = gate.rpl;
+            gate_desc->dpl = 3; // For ring 3
             gate_desc->p = 1;
             gate_desc->offset1 = (gate.base & 0xffff0000) >> 16;
             gate_desc->offset2 = gate.base >> 32;

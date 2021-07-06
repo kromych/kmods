@@ -130,7 +130,7 @@ void test_same_priviledge(void)
 
 void test_ring0(void)
 {
-    const unsigned short ldt_index = 4;
+    const unsigned short ldt_index = 0;
     const unsigned char  rpl = 0;
 
     // Segment selector (what goes into a segment register):
