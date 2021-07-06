@@ -193,8 +193,8 @@ int main()
     puts("Testing call gate b/w same priviledge");
     test_same_priviledge();
 
-    //puts("Testing call gate into ring 0");
-    //test_ring0();
+    puts("Testing call gate into ring 0");
+    test_ring0();
 
     return 0;
 }

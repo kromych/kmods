@@ -119,6 +119,7 @@ static const struct file_operations kldt_file_ops = {
 
 static void __attribute__((naked)) __gate_entry(void)
 {
+    // TODO adjust other segment registers
     asm volatile (
         "nop\n"
         "movw $0x0018, %ax\n"
