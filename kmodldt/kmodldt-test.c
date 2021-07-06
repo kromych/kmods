@@ -36,41 +36,25 @@ void __attribute__((__unused__)) affinitize(void)
     ASSERT(sched_setaffinity(getpid(), sizeof(set), &set) == 0);
 }
 
-static struct lcall_addr lcall_addr;
-static char *code_start;
+void test_same_priviledge(void)
+{
+    const size_t size = 0x2000;
+    const size_t code_offset = 0x800;    
 
-int main() {
-    int fd = -1;
+    const unsigned short ldt_index = 0;
+    const unsigned char  rpl = 3;
+
+    // Segment selector (what goes into a segment register):
+    //  0:1     RPL (request priviledge)
+    //  2       Table (0 - GDT, 1 - LDT)
+    //  3:15    Index in the descriptor table
+    const unsigned short sel = (ldt_index << 3) | 4 /*LDT*/ | (rpl & 0x3);
+
+    int  fd = -1;
     char *target = NULL;
-    int ldt_index = 0;
-    unsigned char rpl = 3;
-    unsigned short sel;
+    char *code_start;
 
-    affinitize();
-
-    // Open our special device
-    fd = open("/dev/" KLDT_NAME, O_RDWR);
-    ASSERT(fd >= 0);
-
-    // Allocate memory
-    target = mmap(
-        NULL, 0x2000,
-        PROT_READ | PROT_WRITE | PROT_EXEC,
-        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    ASSERT(target != MAP_FAILED);
-    printf("base address: %#lx\n", (unsigned long)target);
-
-    code_start = target + 0x800;
-
-    // See if possible to execute anything on the page
-    code_start[0] = 0x90; // NOP
-    code_start[1] = 0xC3; // RET
-    asm volatile ("call *code_start\n");
-
-    // Time to setup the LDT.
-    // Reserve space for a long descriptor by setting two short ones
-    // of any type, and the third one for the code segment.
-    struct user_desc desc = {
+    struct user_desc    desc = {
         .limit           = 0xfff,
         .base_addr       = 0xffffffff,
         .seg_32bit       = 1,
@@ -80,6 +64,47 @@ int main() {
         .seg_not_present = 0,
         .useable         = 0,
     };
+    struct setup_gate gate = {
+        .base = 0, // will point to the allocated memory
+        .idx = ldt_index,
+        .rpl = rpl
+    };   
+    struct lcall_addr lcall_addr = {
+        .offset = 0, // Ignored for far calls
+        .sel = sel
+    };
+
+    // Open our special device
+
+    fd = open("/dev/" KLDT_NAME, O_RDWR);
+    ASSERT(fd >= 0);
+
+    // Allocate memory
+
+    target = mmap(
+        NULL, size,
+        PROT_READ | PROT_WRITE | PROT_EXEC,
+        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT(target != MAP_FAILED);
+    
+    code_start = target + code_offset;
+    code_start[0] = 0x90; // NOP
+    code_start[1] = 0xC3; // RET is fine for the same priviledge call
+
+    printf("base address: %#lx\n", (unsigned long)target);
+    ASSERT(mprotect(target, size, PROT_READ | PROT_EXEC) == 0);
+
+    // See if possible to execute anything on the page
+    asm volatile (
+        "leaq   %0, %%rax\n"
+        "call   *(%%rax)\n"
+        : : "m"(code_start) : "rax"
+    );
+
+    // Time to setup the LDT.
+    // Reserve space for a long descriptor by setting two short ones
+    // of any type, and the third one for the code segment.
+
     desc.entry_number = ldt_index;
     ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
     desc.entry_number = ldt_index + 1;
@@ -87,28 +112,29 @@ int main() {
     desc.entry_number = ldt_index + 2;
     ASSERT(syscall(SYS_modify_ldt, 0x11, &desc, sizeof(desc)) == 0);
 
-    struct setup_gate gate = {
-        .base = (unsigned long)code_start, // Can a compiled function, too, of course
-        .idx = ldt_index,
-        .rpl = rpl
-    };
-    
+    // Can point to a compiled function, too, of course
+    gate.base = (unsigned long)code_start;
     ASSERT(ioctl(fd, KLDT_IOCTL_SETUP_GATE, &gate) == 0);
-
-    // Segment selector (what goes into a segment register):
-    //  0:1     RPL (request priviledge)
-    //  2       Table (0 - GDT, 1 - LDT)
-    //  3:15    Index in the descriptor table
-    sel = (gate.idx << 3) | 4 /*LDT*/ | (rpl & 0x3);
-
-    code_start[0] = 0x90; // NOP
-    code_start[1] = rpl == 3 ? 0xC3 : 0xCB /*LRET*/; // LRET is needed for a priveledge-changing call
-    lcall_addr.offset = 0; // Ignored for the long call
-    lcall_addr.sel = sel;
 
     // Adding rex.w would've meant the offset part has 64 bits.
     // That works on Intel parts but not on the AMD ones.
-    asm volatile ("lcall *(lcall_addr)\n");
+    asm volatile (
+        "leaq   %0, %%rax\n"
+        "lcall  *(%%rax)\n"
+        : : "m"(lcall_addr) : "rax"
+    );
+
+    munmap(target, size);
+    close(fd);
+}
+
+void test_ring0(void)
+{
+}
+
+int main()
+{
+    test_same_priviledge();
 
     return 0;
 }
