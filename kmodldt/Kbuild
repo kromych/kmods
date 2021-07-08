@@ -1,0 +1,5 @@
+CONFIG_MODULE_SIG=n
+
+obj-m := kmodldt.o
+kmodldt-y := kmodldt-main.o
+ccflags-y=-ggdb3 -I$(PWD)
