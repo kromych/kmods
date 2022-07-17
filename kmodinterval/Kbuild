@@ -1,0 +1,3 @@
+obj-m := kmodinterval.o
+kmodinterval-y := kmodinterval-main.o
+ccflags-y=-ggdb3
