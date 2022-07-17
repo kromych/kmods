@@ -14,8 +14,6 @@ static char* interval_list_str;
 module_param(interval_list_str, charp, 0644); // Permissions in /sysfs
 MODULE_PARM_DESC(interval_list_str, "List of intervals");
 
-static struct rb_root_cached intervals = RB_ROOT_CACHED;
-
 enum interval_parse_outcome {
     VALID_INTERVAL_LIST,
     EXPECTED_INTERVAL_START,
@@ -83,8 +81,9 @@ enum interval_parse_outcome
 interval_insert(void* semantic_state, u64 start, u64 end)
 {
     struct interval_tree_node* node = NULL;
+    struct rb_root_cached* intervals = semantic_state;
 
-    node = interval_tree_iter_first(&intervals, start, end);
+    node = interval_tree_iter_first(intervals, start, end);
     if (node)
         return OVERLAPPING_INTERVAL;
     node = kzalloc(sizeof(struct interval_tree_node), GFP_KERNEL);
@@ -93,10 +92,12 @@ interval_insert(void* semantic_state, u64 start, u64 end)
 
     node->start = start;
     node->last = end;
-    interval_tree_insert(node, &intervals);
+    interval_tree_insert(node, intervals);
 
     return VALID_INTERVAL;
 }
+
+static struct rb_root_cached intervals = RB_ROOT_CACHED;
 
 // sudo insmod kmodinterval.ko interval_list=2,3,45-0xFFFF
 static int __init init_intervals(void)
