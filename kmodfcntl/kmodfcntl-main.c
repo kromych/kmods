@@ -14,7 +14,11 @@ MODULE_AUTHOR("kromych");
 MODULE_DESCRIPTION("fcntl module");
 MODULE_VERSION("0.01");
 
+#define KMOD_FCNTL_IOCTL_BASE         		'L'
+#define KMOD_FCNTL_IOCTL_PAUSE_PRODUCING   	_IOW(KMOD_FCNTL_IOCTL_BASE, 0x25, int)
+
 static struct task_struct *producer_task;
+int pause_producing;
 
 static u8 message;
 DECLARE_COMPLETION(message_ready);
@@ -26,6 +30,11 @@ int kmodfcntl_producer_kthread(void* dummy)
 	pr_info("Starting producing messages\n");
 	while (!kthread_should_stop()) {
 		msleep_interruptible(PRODUCE_PERIOD_MSEC);
+
+		if (READ_ONCE(pause_producing)) {
+			pr_info("Producing is paused\n");
+			continue;
+		}
 
 		if (!cmpxchg(&message, 0, 'M')) {
 			pr_info("Produced message\n");
@@ -50,10 +59,12 @@ static u8 kmodfcntl_get_message(void)
 }
 
 static ssize_t kmod_fcntl_read(struct file *, char __user *, size_t, loff_t *);
+static long kmod_fcntl_ioctl(struct file *, unsigned int, unsigned long);
 
 static const struct file_operations kmod_fcntl_file_ops = {
-    .owner = THIS_MODULE,
-    .read = kmod_fcntl_read,
+	.owner = THIS_MODULE,
+	.read = kmod_fcntl_read,
+	.unlocked_ioctl = kmod_fcntl_ioctl
 };
 
 static ssize_t kmod_fcntl_read(struct file *filp, char __user *user_buf, size_t user_buf_size, loff_t *user_offset)
@@ -78,16 +89,26 @@ static ssize_t kmod_fcntl_read(struct file *filp, char __user *user_buf, size_t 
 				return -EFAULT;
 			break;
 		} else {
-			if (!block) 
+			if (!block)
 				return -EAGAIN;
 		}
 	}
 
-    return 1;
+	return 1;
+}
+
+static long kmod_fcntl_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
+{
+	if (cmd != KMOD_FCNTL_IOCTL_PAUSE_PRODUCING)
+		return -ENOIOCTLCMD;
+
+	WRITE_ONCE(pause_producing, arg);
+
+	return 0;
 }
 
 static struct miscdevice kmod_fcntl_dev = {
-    .minor = MISC_DYNAMIC_MINOR,
+	.minor = MISC_DYNAMIC_MINOR,
 	.name = "kmod_fcntl",
 	.nodename = "kmod_fcntl",
 	.fops = &kmod_fcntl_file_ops,
@@ -98,10 +119,10 @@ static int __init init_kmodfcntl(void)
 {
 	int ret;
 
-	pr_info("Initializing\n");
+	pr_info("Initializing, ioctl %#llx\n", (u64)KMOD_FCNTL_IOCTL_PAUSE_PRODUCING);
 
-    pr_info("Registering %s in %s\n", kmod_fcntl_dev.name, __func__);
-    ret = misc_register(&kmod_fcntl_dev);
+	pr_info("Registering %s in %s\n", kmod_fcntl_dev.name, __func__);
+	ret = misc_register(&kmod_fcntl_dev);
 	if (ret)
 		return ret;
 
