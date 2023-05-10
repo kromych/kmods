@@ -1,0 +1,3 @@
+obj-m := kmodfcntl.o
+kmodfcntl-y := kmodfcntl-main.o
+ccflags-y=-ggdb3
